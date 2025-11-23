@@ -21,51 +21,61 @@ const Index = () => {
       title: "Mapa Astral",
       description: "Estudo pessoal completo (~20 páginas) sobre sua personalidade, talentos, desafios e potencial com base em data, hora e local de nascimento.",
       icon: <Sparkles className="w-6 h-6" />,
+      image: "/MAPA ASTRAL.png",
     },
     {
       title: "Horóscopo Personalizado",
       description: "Relatório periódico (mensal ou trimestral) com as tendências astrológicas para você, com foco em amor, carreira, saúde, espiritualidade.",
       icon: <Calendar className="w-6 h-6" />,
+      image: "/HORÓSCOPO PERSONALIZADO.png",
     },
     {
       title: "Sinastria Amorosa",
       description: "Comparação entre dois mapas astrais para entender afinidades, desafios e dinâmica de relacionamento.",
       icon: <Heart className="w-6 h-6" />,
+      image: "/SINATRIA AMOROSA.png",
     },
     {
       title: "Tarot Direto",
       description: "Tiragem de tarot com foco numa pergunta específica (carreira, amor, finanças) + interpretação detalhada.",
       icon: <Wand2 className="w-6 h-6" />,
+      image: "/TAROT DIRETO.png",
     },
     {
       title: "Tarot Mensal",
       description: "Tiragem mensal de 13 cartas cobrindo amor, trabalho, saúde, espiritualidade + orientações para o mês.",
       icon: <Stars className="w-6 h-6" />,
+      image: "/TAROT MENSAL.png",
     },
     {
       title: "Numerologia – Mapa do Ano",
       description: "Estudo numerológico para o ano pessoal, destacando ciclos, oportunidades, desafios e como aproveitar.",
       icon: <TrendingUp className="w-6 h-6" />,
+      image: "/NUMEROLOGIA - MAPA DO ANO.png",
     },
     {
       title: "Mapa Profissional",
       description: "Análise focada na carreira, propósito de vida, talentos profissionais, ambientes ideais, desafios.",
       icon: <TrendingUp className="w-6 h-6" />,
+      image: "/MAPA PROFISSIONAL.png",
     },
     {
       title: "Mapa Infantil",
       description: "Relatório voltado a crianças/adolescentes – personalidade, potencialidades, forma de aprender, suportes para desenvolvimento.",
       icon: <Baby className="w-6 h-6" />,
+      image: "/MAPA INFANTIL.png",
     },
     {
       title: "Mapa Sexual",
       description: "Estudo da sexualidade, desejos, expressão íntima, bloqueios e como explorar de forma saudável.",
       icon: <Flame className="w-6 h-6" />,
+      image: "/MAPA SEXUAL.png",
     },
     {
       title: "Consulta de Bem-Estar / Terapia Leve",
       description: "Sessão de suporte focada em bem-estar, equilíbrio emocional, stress, autoconhecimento.",
       icon: <Smile className="w-6 h-6" />,
+      image: "/TERAPIA LEVE - BEM ESTAR.png",
     },
   ];
 
@@ -116,6 +126,7 @@ const Index = () => {
                 title={product.title}
                 description={product.description}
                 icon={product.icon}
+                image={product.image}
               />
             ))}
           </div>
