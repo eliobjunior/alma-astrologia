@@ -9,9 +9,11 @@ interface ProductCardProps {
   description: string;
   isFree?: boolean;
   icon?: React.ReactNode;
+  image?: string;
+  
 }
 
-export const ProductCard = ({ title, description, isFree = false, icon }: ProductCardProps) => {
+export const ProductCard = ({ title, description, isFree = false, icon, image}: ProductCardProps) => {
   return (
     <Card className="group hover:shadow-[var(--shadow-card)] hover:border-primary/50 transition-all duration-300 bg-card/80 backdrop-blur-sm">
       <CardHeader>
@@ -35,6 +37,16 @@ export const ProductCard = ({ title, description, isFree = false, icon }: Produc
         <CardDescription className="text-muted-foreground">
           {description}
         </CardDescription>
+
+        {image && (
+            <div className="w-full h-48 rounded-xl overflow-hidden bg-background flex items-center justify-center">
+              <img 
+                src={image}
+                alt={title}
+                className="max-w-full max-h-full object-contain"
+              />
+            </div>
+        )}
         
         {!isFree ? (
           <div className="space-y-3 pt-4 border-t border-border">
