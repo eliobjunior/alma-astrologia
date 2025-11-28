@@ -1,148 +1,147 @@
-import { Hero } from "@/components/Hero";
+import React from "react";
 import { ProductCard } from "@/components/ProductCard";
-import { Heart, Map, Stars, Sparkles, Baby, Flame, Smile, Calendar, TrendingUp, Wand2 } from "lucide-react";
 
-const Index = () => {
-  const freeProducts = [
-    {
-      title: "Leitura Resumida do Horóscopo Hoje",
-      description: "Receba uma leitura personalizada do seu horóscopo diário. Gratuito pela primeira vez!",
-      icon: <Stars className="w-6 h-6" />,
-    },
-    {
-      title: "Mini Mapa Astral",
-      description: "Uma página resumida com os principais aspectos do seu mapa astral. Gratuito pela primeira vez!",
-      icon: <Map className="w-6 h-6" />,
-    },
-  ];
-
-  const paidProducts = [
-    {
-      title: "Mapa Astral",
-      description: "Estudo pessoal completo (~20 páginas) sobre sua personalidade, talentos, desafios e potencial com base em data, hora e local de nascimento.",
-      icon: <Sparkles className="w-6 h-6" />,
-      image: "/MAPA ASTRAL.png",
-    },
-    {
-      title: "Horóscopo Personalizado",
-      description: "Relatório periódico (mensal ou trimestral) com as tendências astrológicas para você, com foco em amor, carreira, saúde, espiritualidade.",
-      icon: <Calendar className="w-6 h-6" />,
-      image: "/HORÓSCOPO PERSONALIZADO.png",
-    },
-    {
-      title: "Sinastria Amorosa",
-      description: "Comparação entre dois mapas astrais para entender afinidades, desafios e dinâmica de relacionamento.",
-      icon: <Heart className="w-6 h-6" />,
-      image: "/SINATRIA AMOROSA.png",
-    },
-    {
-      title: "Tarot Direto",
-      description: "Tiragem de tarot com foco numa pergunta específica (carreira, amor, finanças) + interpretação detalhada.",
-      icon: <Wand2 className="w-6 h-6" />,
-      image: "/TAROT DIRETO.png",
-    },
-    {
-      title: "Tarot Mensal",
-      description: "Tiragem mensal de 13 cartas cobrindo amor, trabalho, saúde, espiritualidade + orientações para o mês.",
-      icon: <Stars className="w-6 h-6" />,
-      image: "/TAROT MENSAL.png",
-    },
-    {
-      title: "Numerologia – Mapa do Ano",
-      description: "Estudo numerológico para o ano pessoal, destacando ciclos, oportunidades, desafios e como aproveitar.",
-      icon: <TrendingUp className="w-6 h-6" />,
-      image: "/NUMEROLOGIA - MAPA DO ANO.png",
-    },
-    {
-      title: "Mapa Profissional",
-      description: "Análise focada na carreira, propósito de vida, talentos profissionais, ambientes ideais, desafios.",
-      icon: <TrendingUp className="w-6 h-6" />,
-      image: "/MAPA PROFISSIONAL.png",
-    },
-    {
-      title: "Mapa Infantil",
-      description: "Relatório voltado a crianças/adolescentes – personalidade, potencialidades, forma de aprender, suportes para desenvolvimento.",
-      icon: <Baby className="w-6 h-6" />,
-      image: "/MAPA INFANTIL.png",
-    },
-    {
-      title: "Mapa Sexual",
-      description: "Estudo da sexualidade, desejos, expressão íntima, bloqueios e como explorar de forma saudável.",
-      icon: <Flame className="w-6 h-6" />,
-      image: "/MAPA SEXUAL.png",
-    },
-    {
-      title: "Consulta de Bem-Estar / Terapia Leve",
-      description: "Sessão de suporte focada em bem-estar, equilíbrio emocional, stress, autoconhecimento.",
-      icon: <Smile className="w-6 h-6" />,
-      image: "/TERAPIA LEVE - BEM ESTAR.png",
-    },
-  ];
-
+export default function IndexPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <Hero />
-      
-      <section id="produtos-gratuitos" className="py-20 px-4">
-        <div className="container mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold mb-4 text-foreground">
-              Experimente Gratuitamente
-            </h2>
-            <p className="text-muted-foreground text-lg">
-              Descubra o poder da astrologia com nossos produtos gratuitos
-            </p>
-          </div>
-          
-          <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-            {freeProducts.map((product, index) => (
-              <ProductCard
-                key={index}
-                title={product.title}
-                description={product.description}
-                icon={product.icon}
-                isFree
-              />
-            ))}
-          </div>
+    <main className="max-w-5xl mx-auto px-4 py-10 space-y-12">
+
+      {/* ⭐ PRODUTOS VIRAIS */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          🔥 Produtos Virais
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCard
+            title="Análise Secreta do Seu Signo"
+            description="Descubra revelações profundas sobre sua energia única e como ela afeta seus relacionamentos e futuro."
+            price=""
+          />
+          <ProductCard
+            title="Seu Ano em 3 Palavras"
+            description="Receba uma leitura certeira que resume o ano de 2026 em apenas três palavras-chave poderosas."
+            price=""
+          />
+          <ProductCard
+            title="Missão de Vida 2026"
+            description="Revele o propósito central do seu ano e saiba como se alinhar à sua jornada pessoal."
+            price=""
+          />
+          <ProductCard
+            title="Diagnóstico do Amor"
+            description="Entenda sua energia amorosa e receba um diagnóstico claro sobre sua vida afetiva."
+            price=""
+          />
         </div>
       </section>
 
-      <section id="produtos-pagos" className="py-20 px-4 bg-celestial/30">
-        <div className="container mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold mb-4 text-foreground">
-              Serviços Completos
-            </h2>
-            <p className="text-muted-foreground text-lg">
-              Relatórios detalhados entregues por WhatsApp, PDF e Áudio
-            </p>
-          </div>
-          
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {paidProducts.map((product, index) => (
-              <ProductCard
-                key={index}
-                title={product.title}
-                description={product.description}
-                icon={product.icon}
-                image={product.image}
-              />
-            ))}
-          </div>
+      {/* 💎 ASSINATURAS PRINCIPAIS */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          💎 Assinaturas Premium
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCard
+            title="Clube Alma Ramos"
+            description="Tenha tudo em um só lugar por 6 meses: mapas, análises, previsões, terapia leve e muito mais."
+            price=""
+          />
+
+          <ProductCard
+            title="Plano Total Mensal"
+            description="Acesso mensal completo a previsões, ferramentas astrológicas e relatórios personalizados."
+            price=""
+          />
+
+          <ProductCard
+            title="Tarot Mensal Premium"
+            description="Versão premium com benefícios extras e análises mais profundas."
+            price=""
+          />
         </div>
       </section>
 
-      <footer className="py-12 px-4 border-t border-border">
-        <div className="container mx-auto text-center text-muted-foreground">
-          <p className="mb-4">© 2024 Alma Ramos - Todos os direitos reservados</p>
-          <p className="text-sm">
-            Os serviços oferecidos têm caráter de entretenimento e autoconhecimento.
-          </p>
+      {/* 🌙 MAPAS ASTROLÓGICOS */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          🌙 Mapas Astrológicos
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          <ProductCard
+            title="Mapa Astral Personalizado"
+            description="Entenda quem você realmente é com um mapa completo e detalhado."
+          />
+
+          <ProductCard
+            title="Mapa Profissional"
+            description="Descubra talentos, habilidades e o caminho ideal para sua carreira."
+          />
+
+          <ProductCard
+            title="Mapa Infantil"
+            description="Compreenda a personalidade da criança e como guiá-la com mais leveza."
+          />
+
+          <ProductCard
+            title="Mapa Sexual"
+            description="Aprenda sobre seus desejos, compatibilidades e energia íntima."
+          />
+
+          <ProductCard
+            title="Numerologia - Mapa do Ano"
+            description="A vibração que guiará suas oportunidades, desafios e crescimento em 2026."
+          />
         </div>
-      </footer>
-    </div>
+      </section>
+
+      {/* ❤️ ASTROLOGIA DO AMOR */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          ❤️ Astrologia do Amor
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCard
+            title="Sinastria Amorosa"
+            description="Entenda a compatibilidade e a dinâmica energética entre você e outra pessoa."
+          />
+        </div>
+      </section>
+
+      {/* 🔮 TAROT */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          🔮 Tarot
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCard
+            title="Tarot Direto"
+            description="Uma resposta clara, direta e objetiva para a sua pergunta."
+          />
+          <ProductCard
+            title="Horóscopo Personalizado"
+            description="Receba previsões diárias adaptadas ao seu mapa e energia."
+          />
+        </div>
+      </section>
+
+      {/* 🧘 TERAPIA E BEM-ESTAR */}
+      <section>
+        <h2 className="text-2xl font-bold mb-6 text-primary">
+          🧘 Terapia & Bem-Estar
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCard
+            title="Terapia de Bem-Estar"
+            description="Atendimentos leves guiados por I.A para equilíbrio emocional e mental."
+          />
+        </div>
+      </section>
+    </main>
   );
-};
-
-export default Index;
+}
