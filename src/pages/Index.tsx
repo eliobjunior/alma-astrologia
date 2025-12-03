@@ -5,10 +5,10 @@ export default function IndexPage() {
   return (
     <main className="max-w-5xl mx-auto px-4 py-10 space-y-12">
 
-      {/* ⭐ PRODUTOS VIRAIS */}
+      {/* ⭐ TENDÊNCIAS ASTRAIS */}
       <section>
         <h2 className="text-2xl font-bold mb-6 text-primary">
-          🔥 Produtos Virais
+          🔥 Tendências Astrais
         </h2>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -32,11 +32,16 @@ export const ProductCard = ({
   isFree = false,
   icon,
 }: ProductCardProps) => {
-  // Busca os links do produto pelo título
+  // Busca os links e preços pelo título
   const stripe = STRIPE_LINKS[title] || {};
+
   const avulsoUrl = stripe.avulso;
   const mensalUrl = stripe.mensal;
   const semestralUrl = stripe.semestral;
+
+  const precoAvulso = stripe.precoAvulso;
+  const precoMensal = stripe.precoMensal;
+  const precoSemestral = stripe.precoSemestral;
 
   const handleOpenStripe = (url?: string) => {
     if (url) window.open(url, "_blank");
@@ -79,29 +84,29 @@ export const ProductCard = ({
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                 onClick={() => handleOpenStripe(avulsoUrl)}
               >
-                🔮 Comprar avulso
+                🔮 Comprar avulso — {precoAvulso}
               </Button>
             )}
 
-            {/* Assinatura Mensal */}
+            {/* Mensal */}
             {mensalUrl && (
               <Button
                 variant="outline"
                 className="w-full border-primary text-primary hover:bg-primary/10"
                 onClick={() => handleOpenStripe(mensalUrl)}
               >
-                📅 Assinatura Mensal
+                📅 Assinatura Mensal — {precoMensal}
               </Button>
             )}
 
-            {/* Assinatura Semestral */}
+            {/* Semestral */}
             {semestralUrl && (
               <Button
                 variant="outline"
                 className="w-full border-accent text-accent hover:bg-accent/10"
                 onClick={() => handleOpenStripe(semestralUrl)}
               >
-                📆 Assinatura Semestral
+                📆 Assinatura Semestral — {precoSemestral}
               </Button>
             )}
           </div>
