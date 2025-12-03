@@ -49,8 +49,8 @@ export function TodosProdutos() {
 
     // 🌟 7. Clube Alma Ramos
     {
-      titulo: "Clube Alma Ramos – O mais completo",
-      descricao: "Uma requisição de cada produto por mês.",
+      titulo: "Clube Alma Ramos – Completo",
+      descricao: "Pode utilizar todos os produtos avulso, uma vez por mês.",
       imagem: IMAGES.clubeAlmaRamos,
     },
 
@@ -153,12 +153,23 @@ export function TodosProdutos() {
                 <h2 className="text-lg font-bold mb-2">{p.titulo}</h2>
                 <p className="text-sm text-gray-300 mb-4">{p.descricao}</p>
 
-                <Button
-                  onClick={() => window.open(url, "_blank")}
-                  className="w-full bg-yellow-400 text-black font-semibold hover:bg-yellow-300"
-                >
-                  {preco ? `Comprar — ${preco}` : "Comprar"}
-                </Button>
+<Button
+  onClick={() => window.open(url, "_blank")}
+  className="w-full bg-yellow-400 text-black font-semibold hover:bg-yellow-300"
+>
+
+  {[
+    "Terapia de Bem-Estar com I.A",
+    "Clube Alma Ramos – Completo",
+    "Plano Total Mensal"
+  ].includes(p.titulo)
+    ? `Assinar — ${preco}`
+    : preco
+    ? `Comprar Avulso — ${preco}`
+    : "Comprar"}
+
+</Button>
+
               </CardContent>
             </Card>
           );
