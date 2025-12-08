@@ -160,7 +160,7 @@ export function TodosProdutos() {
 
   {[
     "Terapia de Bem-Estar com I.A",
-    "Clube Alma Ramos – Completo",
+    "Clube Alma Ramos — Completo",
     "Plano Total Mensal"
   ].includes(p.titulo)
     ? `Assinar — ${preco}`

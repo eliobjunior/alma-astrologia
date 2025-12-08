@@ -11,6 +11,7 @@ interface ProductFormProps {
 
 export const ProductForm = ({ productName, paymentType }: ProductFormProps) => {
   const { toast } = useToast();
+
   const [formData, setFormData] = useState({
     nomeCompleto: "",
     dataNascimento: "",
@@ -22,145 +23,56 @@ export const ProductForm = ({ productName, paymentType }: ProductFormProps) => {
     email: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // ------------------------------------------------------------
+  // HANDLE SUBMIT — Envia diretamente para o n8n via webhook
+  // ------------------------------------------------------------
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Aqui será integrado com n8n/OpenAI no futuro
-    console.log("Dados do formulário:", {
+
+    const payload = {
       produto: productName,
       tipoPagamento: paymentType,
-      ...formData
-    });
+      ...formData,
+    };
 
-    toast({
-      title: "Solicitação enviada!",
-      description: "Em breve você receberá seu relatório por WhatsApp e e-mail.",
-    });
+    try {
+      // 🔥 ENVIO DIRETO PARA O N8N (substitua pelo seu webhook!)
+      await fetch("https://SEU_WEBHOOK_DO_N8N", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      toast({
+        title: "Solicitação enviada!",
+        description: "Em breve você receberá seu relatório por WhatsApp e e-mail.",
+      });
+
+      // Se for produto pago, você redirecionará para o Stripe aqui:
+      if (paymentType !== "gratuito") {
+        // redirecione para sua página de checkout
+        // window.location.href = "/checkout/" + productName.toLowerCase();
+      }
+
+    } catch (error) {
+      toast({
+        title: "Erro ao enviar",
+        description: "Não foi possível enviar os dados. Tente novamente.",
+        variant: "destructive",
+      });
+    }
   };
 
+  // ------------------------------------------------------------
+  // HANDLE CHANGE — Atualiza campos
+  // ------------------------------------------------------------
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [e.target.name]: e.target.value,
     });
   };
 
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Label htmlFor="nomeCompleto">Nome Completo</Label>
-        <Input
-          id="nomeCompleto"
-          name="nomeCompleto"
-          value={formData.nomeCompleto}
-          onChange={handleChange}
-          required
-          className="bg-muted/50"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="dataNascimento">Data de Nascimento</Label>
-          <Input
-            id="dataNascimento"
-            name="dataNascimento"
-            type="date"
-            value={formData.dataNascimento}
-            onChange={handleChange}
-            required
-            className="bg-muted/50"
-          />
-        </div>
-        
-        <div>
-          <Label htmlFor="hora">Hora de Nascimento</Label>
-          <Input
-            id="hora"
-            name="hora"
-            type="time"
-            value={formData.hora}
-            onChange={handleChange}
-            required
-            className="bg-muted/50"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="cidade">Cidade</Label>
-          <Input
-            id="cidade"
-            name="cidade"
-            value={formData.cidade}
-            onChange={handleChange}
-            required
-            className="bg-muted/50"
-          />
-        </div>
-        
-        <div>
-          <Label htmlFor="estado">Estado</Label>
-          <Input
-            id="estado"
-            name="estado"
-            value={formData.estado}
-            onChange={handleChange}
-            required
-            className="bg-muted/50"
-          />
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="pais">País</Label>
-        <Input
-          id="pais"
-          name="pais"
-          value={formData.pais}
-          onChange={handleChange}
-          required
-          className="bg-muted/50"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="whatsapp">WhatsApp</Label>
-        <Input
-          id="whatsapp"
-          name="whatsapp"
-          type="tel"
-          placeholder="+55 (11) 99999-9999"
-          value={formData.whatsapp}
-          onChange={handleChange}
-          required
-          className="bg-muted/50"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="email">E-mail</Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          value={formData.email}
-          onChange={handleChange}
-          required
-          className="bg-muted/50"
-        />
-      </div>
-
-      <Button type="submit" className="w-full bg-primary hover:bg-primary/90">
-        {paymentType === "gratuito" ? "Solicitar Gratuitamente" : "Confirmar Solicitação"}
-      </Button>
-
-      {paymentType !== "gratuito" && (
-        <p className="text-xs text-muted-foreground text-center">
-          Você será redirecionado para o pagamento após confirmar
-        </p>
-      )}
-    </form>
-  );
-};
+  // ------------------------------------------------------------
+  // FORMULÁRIO — JSX
+  // ------------------------------------------------------------
