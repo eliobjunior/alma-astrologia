@@ -1,84 +1,85 @@
 // src/data/stripeLinks.ts
 export const STRIPE_LINKS: Record<string, any> = {
   "Sinastria Amorosa": {
-    avulso: String.raw`https://buy.stripe.com/fZu7sN88MbMd8WA5Yl2cg0s`,
+    avulso: "https://mpago.la/2wXmuVh",
     precoAvulso: "R$ 19,00",
   },
 
   "Mapa Astral Personalizado": {
-    avulso: String.raw`https://buy.stripe.com/28E6oJ88M5nP5Ko0E12cg0q`,
+    avulso: "https://mpago.la/1Nw214R",
     precoAvulso: "R$ 14,00",
   },
 
   "Horóscopo Personalizado": {
-    avulso: String.raw`https://buy.stripe.com/aFa6oJcp28A1dcQdqN2cg0p`,
+    avulso: "https://mpago.la/2mZLA9c",
     precoAvulso: "R$ 14,00",
   },
 
   "Tarot Direto": {
-    avulso: String.raw`https://buy.stripe.com/14A5kF88McQhegUbiF2cg0o`,
+    avulso: "https://mpago.la/1m4CVUU",
     precoAvulso: "R$ 14,00",
   },
 
   "Numerologia – Mapa do Ano": {
-    avulso: String.raw`https://buy.stripe.com/8x2dRb9cQeYpdcQ9ax2cg0n`,
+    avulso: "https://mpago.la/1ABpCGt",
     precoAvulso: "R$ 14,00",
   },
 
   "Mapa Infantil": {
-    avulso: String.raw`https://buy.stripe.com/fZu3cxgFi17zfkYeuR2cg0m`,
+    avulso: "https://mpago.la/1p6QHPx",
     precoAvulso: "R$ 14,00",
   },
 
   "Mapa Sexual": {
-    avulso: String.raw`https://buy.stripe.com/eVq3cxdt62bD5Ko86t2cg0l`,
+    avulso: "https://mpago.la/1FpDFcx",
     precoAvulso: "R$ 14,00",
   },
 
   "Tarot Mensal Premium": {
-    avulso: String.raw`https://buy.stripe.com/cNibJ34WAaI93Cg2M92cg0k`,
+    avulso: "https://mpago.la/25cfApk",
     precoAvulso: "R$ 19,00",
   },
 
   "Mapa Profissional": {
-    avulso: String.raw`https://buy.stripe.com/9B6bJ34WAcQh8WA86t2cg0i`,
+    avulso: "https://mpago.la/31ppWN3",
     precoAvulso: "R$ 19,00",
   },
 
   "Diagnóstico do Amor": {
-    avulso: String.raw`https://buy.stripe.com/bJe00l88M9E5fkYeuR2cg0f`,
+    avulso: "https://mpago.la/12LAHQK",
     precoAvulso: "R$ 7,00",
   },
 
   "Missão de Vida 2026": {
-    avulso: String.raw`https://buy.stripe.com/9B67sN3SwcQh3CgfyV2cg0e`,
+    avulso: "https://mpago.la/2jh4bmN",
     precoAvulso: "R$ 12,00",
   },
 
   "Seu Ano em 3 Palavras": {
-    avulso: String.raw`https://buy.stripe.com/4gM6oJ1Ko4jLb4IaeB2cg0d`,
+    avulso: "https://mpago.la/2apjLgx",
     precoAvulso: "R$ 5,00",
   },
 
   "Análise Secreta do Seu Signo": {
-    avulso: String.raw`https://buy.stripe.com/dRmdRb2Os03v1u8euR2cg0c`,
+    avulso: "https://mpago.la/2jLqcjz",
     precoAvulso: "R$ 7,00",
   },
 
   // PLANOS
   "Plano Total Mensal": {
-    mensal: String.raw`https://buy.stripe.com/7sY8wR2OsbMdfkY4Uh2cg0h`,
+    mensal:
+      "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=cae38c4aa0934b819d5b0dedfbd8fa43",
     precoMensal: "R$ 29,00/mês",
   },
 
-  // ⚠️ Usando o MESMO hífen do arquivo TodosProdutos.tsx (–)
+  // ⚠️ Mantido EXATAMENTE o mesmo hífen (–)
   "Clube Alma Ramos – Completo": {
-    semestral: String.raw`https://buy.stripe.com/5kQ8wRexa17z3CgbiF2cg0g`,
+    semestral: "https://mpago.la/2fgiUGu",
     precoSemestral: "R$ 129,00 a cada 6 meses",
   },
 
   "Terapia de Bem-Estar com I.A": {
-    semestral: String.raw`https://buy.stripe.com/8x28wRdt64jLdcQ86t2cg0r`,
+    semestral: "https://mpago.la/25inWJZ",
     precoSemestral: "R$ 114,00 a cada 6 meses",
   },
 };
