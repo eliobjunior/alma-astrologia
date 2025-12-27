@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { ProductForm } from "./ProductForm";
 import { Sparkles } from "lucide-react";
-import { STRIPE_LINKS } from "@/data/stripeLinks";
+import { PAYMENT_LINKS } from "@/data/paymentProviders";
 
 interface ProductCardProps {
   title: string;
@@ -32,23 +32,18 @@ export const ProductCard = ({
   isFree = false,
   icon,
 }: ProductCardProps) => {
-  // Busca os links e preços pelo título
-  const stripe = STRIPE_LINKS[title] || {};
+  // Busca os links de pagamento pelo título do produto
+  const payment = PAYMENT_LINKS[title] || {};
 
-  const avulsoUrl = stripe.avulso;
-  const mensalUrl = stripe.mensal;
-  const semestralUrl = stripe.semestral;
+  const { avulso, mensal, semestral, precoAvulso, precoMensal, precoSemestral } =
+    payment;
 
-  const precoAvulso = stripe.precoAvulso;
-  const precoMensal = stripe.precoMensal;
-  const precoSemestral = stripe.precoSemestral;
-
-  const handleOpenStripe = (url?: string) => {
+  const handleOpenPayment = (url?: string) => {
     if (url) window.open(url, "_blank");
   };
 
   return (
-    <Card className="group hover:shadow-[var(--shadow-card)] hover:border-primary/50 transition-all duration-300 bg-card/80 backdrop-blur-sm">
+    <Card className="group bg-card/80 backdrop-blur-sm border border-border hover:border-primary/50 hover:shadow-[var(--shadow-card)] transition-all duration-300">
       <CardHeader>
         <div className="flex items-start gap-3">
           <div className="p-2 rounded-lg bg-primary/10 text-primary group-hover:bg-primary/20 transition-colors">
@@ -74,44 +69,44 @@ export const ProductCard = ({
           {description}
         </CardDescription>
 
-        {/* Produto Pago */}
+        {/* PRODUTO PAGO */}
         {!isFree ? (
           <div className="space-y-3 pt-4 border-t border-border">
 
             {/* Compra Avulsa */}
-            {avulsoUrl && (
+            {avulso && (
               <Button
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                onClick={() => handleOpenStripe(avulsoUrl)}
+                onClick={() => handleOpenPayment(avulso)}
               >
                 🔮 Comprar avulso — {precoAvulso}
               </Button>
             )}
 
-            {/* Mensal */}
-            {mensalUrl && (
+            {/* Assinatura Mensal */}
+            {mensal && (
               <Button
                 variant="outline"
                 className="w-full border-primary text-primary hover:bg-primary/10"
-                onClick={() => handleOpenStripe(mensalUrl)}
+                onClick={() => handleOpenPayment(mensal)}
               >
                 📅 Assinatura Mensal — {precoMensal}
               </Button>
             )}
 
-            {/* Semestral */}
-            {semestralUrl && (
+            {/* Assinatura Semestral */}
+            {semestral && (
               <Button
                 variant="outline"
                 className="w-full border-accent text-accent hover:bg-accent/10"
-                onClick={() => handleOpenStripe(semestralUrl)}
+                onClick={() => handleOpenPayment(semestral)}
               >
                 📆 Assinatura Semestral — {precoSemestral}
               </Button>
             )}
           </div>
         ) : (
-          /* Produto Gratuito */
+          /* PRODUTO GRATUITO */
           <Dialog>
             <DialogTrigger asChild>
               <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
@@ -128,10 +123,7 @@ export const ProductCard = ({
                 </DialogDescription>
               </DialogHeader>
 
-              <ProductForm
-                productName={title}
-                paymentType="gratuito"
-              />
+              <ProductForm productName={title} paymentType="gratuito" />
             </DialogContent>
           </Dialog>
         )}

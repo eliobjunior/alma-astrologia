@@ -2,18 +2,21 @@ import { Sparkles, BrainCircuit, Stars, Atom } from "lucide-react";
 
 export function HeaderBeneficiosPro() {
   const signos = [
-    "♈ ÁRIES",
-    "♉ TOURO",
-    "♊ GÊMEOS",
-    "♋ CÂNCER",
-    "♌ LEÃO",
-    "♍ VIRGEM",
-    "♎ LIBRA",
-    "♏ ESCORPIÃO",
-    "♐ SAGITÁRIO",
-    "♑ CAPRICÓRNIO",
-    "♒ AQUÁRIO",
-    "♓ PEIXES",
+  "♈ ARIES :: α01",
+  "♉ TAURUS :: β02",
+  "♊ GEMINI :: γ03",
+  "♋ CANCER :: δ04",
+  "♌ LEO :: ε05",
+  "♍ VIRGO :: ζ06",
+  "♎ LIBRA :: η07",
+  "♏ SCORPIO :: θ08",
+  "♐ SAGITTARIUS :: λ09",
+  "♑ CAPRICORN :: μ10",
+  "♒ AQUARIUS :: ξ11",
+  "♓ PISCES :: ω12",
+  "⟁ DATA_NODE",
+  "⌬ COSMIC_AI",
+  "⊛ ORBITAL_SYS",
   ];
 
   return (
@@ -129,17 +132,15 @@ export function HeaderBeneficiosPro() {
           grid-template-columns: repeat(7, 1fr);
           padding: 2rem;
         }
-
         .signos-coluna {
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
-          font-family: "JetBrains Mono", "Courier New", monospace;
-          font-size: 1.7rem;
-          font-weight: 600;
-          color: rgba(0, 255, 180, 0.18);
-          text-shadow: 0 0 6px rgba(0, 255, 180, 0.35);
-          animation: subirSignos 34s linear infinite;
+        font-family: "JetBrains Mono", "Space Grotesk", monospace;
+        font-size: 1.8rem;
+        font-weight: 600;
+        color: rgba(140, 220, 255, 0.22);
+        text-shadow:
+        0 0 6px rgba(140, 220, 255, 0.45),
+        0 0 14px rgba(140, 120, 255, 0.25);     
+        animation: subirSignos 34s linear infinite;
         }
 
         .coluna-0 { animation-duration: 44s; opacity: 0.12; }

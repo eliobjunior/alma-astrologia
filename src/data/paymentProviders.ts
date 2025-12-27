@@ -1,5 +1,22 @@
-// src/data/stripeLinks.ts
-export const STRIPE_LINKS: Record<string, any> = {
+// src/data/paymentProviders.ts
+
+/**
+ * Estrutura genérica de links de pagamento.
+ * Agnóstica de gateway (atualmente Mercado Pago).
+ */
+
+export type PaymentLink = {
+  avulso?: string;
+  mensal?: string;
+  semestral?: string;
+  precoAvulso?: string;
+  precoMensal?: string;
+  precoSemestral?: string;
+};
+
+export const PAYMENT_LINKS: Record<string, PaymentLink> = {
+  // PRODUTOS AVULSOS
+
   "Sinastria Amorosa": {
     avulso: "https://mpago.la/2wXmuVh",
     precoAvulso: "R$ 19,00",
@@ -65,14 +82,15 @@ export const STRIPE_LINKS: Record<string, any> = {
     precoAvulso: "R$ 7,00",
   },
 
-  // PLANOS
+  // PLANOS / ASSINATURAS
+
   "Plano Total Mensal": {
     mensal:
       "https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=cae38c4aa0934b819d5b0dedfbd8fa43",
     precoMensal: "R$ 29,00/mês",
   },
 
-  // ⚠️ Mantido EXATAMENTE o mesmo hífen (–)
+  // ⚠️ ATENÇÃO: manter exatamente o hífen longo (–)
   "Clube Alma Ramos – Completo": {
     semestral: "https://mpago.la/2fgiUGu",
     precoSemestral: "R$ 129,00 a cada 6 meses",
