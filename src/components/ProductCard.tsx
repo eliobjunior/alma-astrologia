@@ -26,20 +26,26 @@ interface ProductCardProps {
   icon?: React.ReactNode;
 }
 
-export const ProductCard = ({
+export const ProductCard: React.FC<ProductCardProps> = ({
   title,
   description,
   isFree = false,
   icon,
-}: ProductCardProps) => {
-  // Busca os links de pagamento pelo título do produto
-  const payment = PAYMENT_LINKS[title] || {};
+}) => {
+  // Busca dados de pagamento pelo título do produto
+  const payment = PAYMENT_LINKS[title];
 
-  const { avulso, mensal, semestral, precoAvulso, precoMensal, precoSemestral } =
-    payment;
+  const avulso = payment?.avulso;
+  const mensal = payment?.mensal;
+  const semestral = payment?.semestral;
+
+  const precoAvulso = payment?.precoAvulso;
+  const precoMensal = payment?.precoMensal;
+  const precoSemestral = payment?.precoSemestral;
 
   const handleOpenPayment = (url?: string) => {
-    if (url) window.open(url, "_blank");
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -69,17 +75,18 @@ export const ProductCard = ({
           {description}
         </CardDescription>
 
-        {/* PRODUTO PAGO */}
-        {!isFree ? (
+        {/* ─────────────────────────────
+            PRODUTO PAGO
+           ───────────────────────────── */}
+        {!isFree && payment && (
           <div className="space-y-3 pt-4 border-t border-border">
-
             {/* Compra Avulsa */}
             {avulso && (
               <Button
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                 onClick={() => handleOpenPayment(avulso)}
               >
-                🔮 Comprar avulso — {precoAvulso}
+                🔮 Comprar avulso {precoAvulso && `— ${precoAvulso}`}
               </Button>
             )}
 
@@ -90,7 +97,7 @@ export const ProductCard = ({
                 className="w-full border-primary text-primary hover:bg-primary/10"
                 onClick={() => handleOpenPayment(mensal)}
               >
-                📅 Assinatura Mensal — {precoMensal}
+                📅 Assinatura Mensal {precoMensal && `— ${precoMensal}`}
               </Button>
             )}
 
@@ -101,12 +108,17 @@ export const ProductCard = ({
                 className="w-full border-accent text-accent hover:bg-accent/10"
                 onClick={() => handleOpenPayment(semestral)}
               >
-                📆 Assinatura Semestral — {precoSemestral}
+                📆 Assinatura Semestral{" "}
+                {precoSemestral && `— ${precoSemestral}`}
               </Button>
             )}
           </div>
-        ) : (
-          /* PRODUTO GRATUITO */
+        )}
+
+        {/* ─────────────────────────────
+            PRODUTO GRATUITO
+           ───────────────────────────── */}
+        {isFree && (
           <Dialog>
             <DialogTrigger asChild>
               <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
@@ -119,11 +131,14 @@ export const ProductCard = ({
                 <DialogTitle>{title}</DialogTitle>
                 <DialogDescription>
                   Preencha seus dados para receber seu{" "}
-                  {title.toLowerCase()} gratuitamente.
+                  <strong>{title.toLowerCase()}</strong> gratuitamente.
                 </DialogDescription>
               </DialogHeader>
 
-              <ProductForm productName={title} paymentType="gratuito" />
+              <ProductForm
+                productName={title}
+                paymentType="gratuito"
+              />
             </DialogContent>
           </Dialog>
         )}

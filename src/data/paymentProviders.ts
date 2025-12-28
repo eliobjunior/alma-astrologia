@@ -3,6 +3,7 @@
 /**
  * Estrutura genérica de links de pagamento.
  * Agnóstica de gateway (atualmente Mercado Pago).
+ * Permite troca futura sem refatorar componentes.
  */
 
 export type PaymentLink = {
@@ -14,8 +15,10 @@ export type PaymentLink = {
   precoSemestral?: string;
 };
 
-export const PAYMENT_LINKS: Record<string, PaymentLink> = {
+export const PAYMENT_PROVIDERS: Record<string, PaymentLink> = {
+  // ─────────────────────────────
   // PRODUTOS AVULSOS
+  // ─────────────────────────────
 
   "Sinastria Amorosa": {
     avulso: "https://mpago.la/2wXmuVh",
@@ -82,7 +85,9 @@ export const PAYMENT_LINKS: Record<string, PaymentLink> = {
     precoAvulso: "R$ 7,00",
   },
 
+  // ─────────────────────────────
   // PLANOS / ASSINATURAS
+  // ─────────────────────────────
 
   "Plano Total Mensal": {
     mensal:
@@ -90,7 +95,8 @@ export const PAYMENT_LINKS: Record<string, PaymentLink> = {
     precoMensal: "R$ 29,00/mês",
   },
 
-  // ⚠️ ATENÇÃO: manter exatamente o hífen longo (–)
+  // ⚠️ ATENÇÃO:
+  // Manter exatamente o hífen longo (–) no nome da chave
   "Clube Alma Ramos – Completo": {
     semestral: "https://mpago.la/2fgiUGu",
     precoSemestral: "R$ 129,00 a cada 6 meses",
