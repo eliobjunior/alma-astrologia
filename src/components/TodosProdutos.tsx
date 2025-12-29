@@ -6,11 +6,6 @@ import { PAYMENT_PROVIDERS } from "@/data/paymentProviders";
 export function TodosProdutos() {
   const produtos = [
     {
-      titulo: "Terapia de Bem-Estar com I.A",
-      descricao: "Sessões profundas assistidas por inteligência artificial.",
-      imagem: IMAGES.terapiaLeve,
-    },
-    {
       titulo: "Mapa Astral Personalizado",
       descricao: "Seu mapa completo revelando potenciais e missão de alma.",
       imagem: IMAGES.mapaAstral,
@@ -85,6 +80,14 @@ export function TodosProdutos() {
       descricao: "Previsões profundas para cada área do seu mês.",
       imagem: IMAGES.tarotMensalDireto,
     },
+
+    // 🔒 PRODUTO DESATIVADO — SEM LINK / SEM PAGAMENTO
+    {
+      titulo: "Terapia de Bem-Estar com I.A",
+      descricao: "Sessões profundas assistidas por inteligência artificial.",
+      imagem: IMAGES.terapiaLeve,
+      emBreve: true,
+    },
   ];
 
   return (
@@ -109,6 +112,8 @@ export function TodosProdutos() {
             payment?.semestral ||
             "#";
 
+          const isEmBreve = produto.emBreve === true;
+
           return (
             <Card
               key={produto.titulo}
@@ -132,10 +137,23 @@ export function TodosProdutos() {
                 </p>
 
                 <Button
-                  onClick={() => window.open(url, "_blank")}
-                  className="w-full bg-yellow-400 text-black font-semibold hover:bg-yellow-300"
+                  disabled={isEmBreve}
+                  onClick={() => {
+                    if (!isEmBreve) {
+                      window.open(url, "_blank");
+                    }
+                  }}
+                  className={`w-full font-semibold ${
+                    isEmBreve
+                      ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+                      : "bg-yellow-400 text-black hover:bg-yellow-300"
+                  }`}
                 >
-                  {["Plano Total Mensal", "Clube Alma Ramos – Completo", "Terapia de Bem-Estar com I.A"].includes(produto.titulo)
+                  {isEmBreve
+                    ? "Em breve"
+                    : ["Plano Total Mensal", "Clube Alma Ramos – Completo"].includes(
+                        produto.titulo
+                      )
                     ? `Assinar — ${preco}`
                     : preco
                     ? `Comprar Avulso — ${preco}`
