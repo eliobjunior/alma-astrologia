@@ -2,209 +2,85 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
 
 interface ProductFormProps {
   productName: string;
-  paymentType: "gratuito" | "avulso" | "mensal" | "semestral";
+  paymentType: "avulso" | "mensal" | "semestral";
 }
 
-type FormData = {
-  nomeCompleto: string;
-  dataNascimento: string;
-  horaNascimento: string;
-  cidade: string;
-  estado: string;
-  pais: string;
-  whatsapp: string;
-  email: string;
-};
-
-export const ProductForm = ({ productName, paymentType }: ProductFormProps) => {
-  const { toast } = useToast();
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [formData, setFormData] = useState<FormData>({
+export function ProductForm({ productName, paymentType }: ProductFormProps) {
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
     nomeCompleto: "",
+    cidadeNascimento: "",
+    estadoNascimento: "",
+    pais: "",
     dataNascimento: "",
     horaNascimento: "",
-    cidade: "",
-    estado: "",
-    pais: "Brasil",
-    whatsapp: "",
-    email: "",
   });
 
-  // ------------------------------------------------------------
-  // HANDLE SUBMIT — Envia dados para o n8n
-  // ------------------------------------------------------------
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  }
 
-    if (isSubmitting) return;
-    setIsSubmitting(true);
+  async function handleSubmit() {
+    setLoading(true);
 
-    const payload = {
-      produto: productName,
-      tipoPagamento: paymentType,
-      origem: "site-alma-ramos",
-      dadosCliente: {
-        ...formData,
-      },
-      timestamp: new Date().toISOString(),
-    };
+    const response = await fetch("http://localhost:3001/create-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productName,
+        paymentType,
+        ...form,
+      }),
+    });
 
-    try {
-      await fetch("https://SEU_WEBHOOK_DO_N8N", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+    const data = await response.json();
 
-      toast({
-        title: "Solicitação enviada!",
-        description:
-          "Recebemos seus dados. Em breve você receberá instruções por WhatsApp e e-mail.",
-      });
-
-      // Limpa formulário após envio
-      setFormData({
-        nomeCompleto: "",
-        dataNascimento: "",
-        horaNascimento: "",
-        cidade: "",
-        estado: "",
-        pais: "Brasil",
-        whatsapp: "",
-        email: "",
-      });
-    } catch (error) {
-      toast({
-        title: "Erro ao enviar",
-        description: "Não foi possível enviar seus dados. Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSubmitting(false);
+    if (data.init_point) {
+      window.location.href = data.init_point;
+    } else {
+      alert("Erro ao iniciar pagamento");
     }
-  };
 
-  // ------------------------------------------------------------
-  // HANDLE CHANGE — Atualiza campos
-  // ------------------------------------------------------------
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
+    setLoading(false);
+  }
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  // ------------------------------------------------------------
-  // FORMULÁRIO — JSX
-  // ------------------------------------------------------------
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-
+    <div className="space-y-4">
       <div>
-        <Label htmlFor="nomeCompleto">Nome completo</Label>
-        <Input
-          id="nomeCompleto"
-          name="nomeCompleto"
-          value={formData.nomeCompleto}
-          onChange={handleChange}
-          required
-        />
+        <Label>Nome completo</Label>
+        <Input name="nomeCompleto" onChange={handleChange} required />
       </div>
 
       <div>
-        <Label htmlFor="dataNascimento">Data de nascimento</Label>
-        <Input
-          id="dataNascimento"
-          name="dataNascimento"
-          type="date"
-          value={formData.dataNascimento}
-          onChange={handleChange}
-          required
-        />
+        <Label>Cidade de nascimento</Label>
+        <Input name="cidadeNascimento" onChange={handleChange} required />
       </div>
 
       <div>
-        <Label htmlFor="horaNascimento">Hora de nascimento</Label>
-        <Input
-          id="horaNascimento"
-          name="horaNascimento"
-          type="time"
-          value={formData.horaNascimento}
-          onChange={handleChange}
-        />
+        <Label>Estado de nascimento</Label>
+        <Input name="estadoNascimento" onChange={handleChange} required />
       </div>
 
       <div>
-        <Label htmlFor="cidade">Cidade</Label>
-        <Input
-          id="cidade"
-          name="cidade"
-          value={formData.cidade}
-          onChange={handleChange}
-          required
-        />
+        <Label>País</Label>
+        <Input name="pais" defaultValue="Brasil" onChange={handleChange} required />
       </div>
 
       <div>
-        <Label htmlFor="estado">Estado</Label>
-        <Input
-          id="estado"
-          name="estado"
-          value={formData.estado}
-          onChange={handleChange}
-          required
-        />
+        <Label>Data de nascimento</Label>
+        <Input type="date" name="dataNascimento" onChange={handleChange} required />
       </div>
 
       <div>
-        <Label htmlFor="pais">País</Label>
-        <Input
-          id="pais"
-          name="pais"
-          value={formData.pais}
-          onChange={handleChange}
-        />
+        <Label>Horário de nascimento (opcional)</Label>
+        <Input type="time" name="horaNascimento" onChange={handleChange} />
       </div>
 
-      <div>
-        <Label htmlFor="whatsapp">WhatsApp</Label>
-        <Input
-          id="whatsapp"
-          name="whatsapp"
-          placeholder="(DDD) 99999-9999"
-          value={formData.whatsapp}
-          onChange={handleChange}
-          required
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="email">E-mail</Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          value={formData.email}
-          onChange={handleChange}
-          required
-        />
-      </div>
-
-      <Button
-        type="submit"
-        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? "Enviando..." : "Enviar dados"}
+      <Button className="w-full" onClick={handleSubmit} disabled={loading}>
+        {loading ? "Redirecionando..." : "Continuar para pagamento"}
       </Button>
-    </form>
-  );
-};
+    </div>
+}
