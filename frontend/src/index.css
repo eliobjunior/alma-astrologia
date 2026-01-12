@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   RESET GLOBAL + BASE VISUAL
+   ========================================================= */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #05040d;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
+    "Helvetica Neue", sans-serif;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Evita flashes brancos ao carregar */
+* {
+  box-sizing: border-box;
+}
+
+/* =========================================================
+   SCROLLBAR (igual produção)
+   ========================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #05040d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4a;
+}
+
+/* =========================================================
+   FUNDO DE ESTRELAS (HEADER)
+   ========================================================= */
+
+.stars {
+  background: radial-gradient(white 1px, transparent 1px);
+  background-size: 3px 3px;
+  position: absolute;
+  inset: 0;
+  width: 200%;
+  height: 200%;
+  animation: moveStars 160s linear infinite;
+  opacity: 0.16;
+}
+
+.twinkling {
+  background: radial-gradient(white 1px, transparent 1px);
+  background-size: 2px 2px;
+  position: absolute;
+  inset: 0;
+  width: 200%;
+  height: 200%;
+  animation: moveTwinkling 200s linear infinite;
+  opacity: 0.08;
+}
+
+/* =========================================================
+   SIGNOS FLUTUANTES (HEADER)
+   ========================================================= */
+
+.signos-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 3rem;
+  padding: 2.5rem;
+  animation: subirSignos 18s linear infinite;
+}
+
+.signo {
+  font-family: "JetBrains Mono", "Courier New", monospace;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: rgba(120, 255, 210, 0.15);
+  text-shadow:
+    0 0 1px rgba(120, 255, 210, 0.25),
+    0 0 4px rgba(120, 255, 210, 0.15);
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+/* Profundidade visual por linha */
+.signos-grid .signo:nth-child(6n + 1),
+.signos-grid .signo:nth-child(6n + 2) {
+  opacity: 0.22;
+}
+
+.signos-grid .signo:nth-child(6n + 3),
+.signos-grid .signo:nth-child(6n + 4) {
+  opacity: 0.16;
+}
+
+.signos-grid .signo:nth-child(6n + 5),
+.signos-grid .signo:nth-child(6n + 6) {
+  opacity: 0.11;
+}
+
+/* =========================================================
+   ANIMAÇÕES
+   ========================================================= */
+
+@keyframes subirSignos {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-55%);
+  }
+}
+
+@keyframes moveStars {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1400px);
+  }
+}
+
+@keyframes moveTwinkling {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1000px);
+  }
+}
+
+@keyframes pulse-slow {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s ease-in-out infinite;
+}
+
+/* =========================================================
+   UTILITÁRIOS VISUAIS GERAIS
+   ========================================================= */
+
+/* Evita seleção acidental em fundos animados */
+.no-select {
+  user-select: none;
+}
+
+/* Melhora aparência de imagens em dark UI */
+img {
+  display: block;
+  max-width: 100%;
+}

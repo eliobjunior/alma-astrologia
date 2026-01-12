@@ -1,22 +1,16 @@
 # Node
-node_modules
+node_modules/
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+yarn.lock
 
-# Environment variables
+# Frontend build
+frontend/dist/
+
+# Env
 .env
+backend/.env
 
-# Build / frontend
-dist
-frontend
-package-lock.frontend.json
-package.frontend.json
-
-# IDEs / OS
-.vscode
-.idea
+# IDEs
+.vscode/
+.idea/
 .DS_Store
-
-# Misc
-*.log
