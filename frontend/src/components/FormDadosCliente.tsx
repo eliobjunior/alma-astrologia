@@ -30,6 +30,7 @@ export function FormDadosCliente({
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
 
+    // Máscara de data dd/mm/aaaa (mantida)
     if (name === "dataNascimento") {
       const onlyNumbers = value.replace(/\D/g, "");
       let formatted = onlyNumbers;
@@ -58,7 +59,8 @@ export function FormDadosCliente({
     if (!form.email) camposFaltantes.push("E-mail");
     if (!form.dataNascimento || form.dataNascimento.length !== 10)
       camposFaltantes.push("Data de nascimento");
-    if (!form.horaNascimento) camposFaltantes.push("Hora do nascimento");
+    if (!form.horaNascimento)
+      camposFaltantes.push("Hora do nascimento");
     if (!form.cidadeNascimento)
       camposFaltantes.push("Cidade de nascimento");
 
@@ -73,35 +75,34 @@ export function FormDadosCliente({
     return true;
   }
 
-  /* =========================
-     ENVIO PARA BACKEND
-  ========================= */
-
   async function handlePagar() {
     if (!validarFormulario()) return;
 
-    setLoading(true);
-
     try {
-      const response = await api.post("/orders", {
+      setLoading(true);
+
+      // 1️⃣ Cria pedido (antes do pagamento)
+      const orderResponse = await api.post("/orders", {
         produtoId,
-        nome: form.nome,
-        email: form.email,
-        dataNascimento: form.dataNascimento,
-        horaNascimento: form.horaNascimento,
-        cidadeNascimento: form.cidadeNascimento,
+        ...form,
       });
 
-      const { paymentUrl } = response.data;
+      const { orderId } = orderResponse.data;
 
-      if (!paymentUrl) {
-        throw new Error("URL de pagamento não retornada pelo backend");
-      }
+      // 2️⃣ Cria pagamento
+      const pagamentoResponse = await api.post("/pagamento", {
+        produtoId,
+        orderId,
+        dadosCliente: form,
+      });
 
-      window.location.href = paymentUrl;
+      // 3️⃣ Redireciona Mercado Pago
+      window.location.href =
+        pagamentoResponse.data.pagamento.init_point;
     } catch (error) {
       console.error(error);
       setErro("Erro ao iniciar pagamento. Tente novamente.");
+    } finally {
       setLoading(false);
     }
   }
@@ -147,6 +148,7 @@ export function FormDadosCliente({
             className="w-full p-3 rounded bg-[#05040D] border border-[#333]"
           />
 
+          {/* Campo de hora – ícone funciona no mobile */}
           <input
             name="horaNascimento"
             type="time"
