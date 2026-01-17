@@ -58,6 +58,7 @@ export function FormDadosCliente({
     if (!form.email) camposFaltantes.push("E-mail");
     if (!form.dataNascimento || form.dataNascimento.length !== 10)
       camposFaltantes.push("Data de nascimento");
+    if (!form.horaNascimento) camposFaltantes.push("Hora do nascimento");
     if (!form.cidadeNascimento)
       camposFaltantes.push("Cidade de nascimento");
 
@@ -73,10 +74,7 @@ export function FormDadosCliente({
   }
 
   /* =========================
-     FLUXO PRINCIPAL
-     1. POST /orders
-     2. POST /pagamento
-     3. Redirect Mercado Pago
+     ENVIO PARA BACKEND
   ========================= */
 
   async function handlePagar() {
@@ -85,8 +83,7 @@ export function FormDadosCliente({
     setLoading(true);
 
     try {
-      /* ---------- 1. CRIA ORDER ---------- */
-      const orderResponse = await api.post("/orders", {
+      const response = await api.post("/orders", {
         produtoId,
         nome: form.nome,
         email: form.email,
@@ -95,30 +92,16 @@ export function FormDadosCliente({
         cidadeNascimento: form.cidadeNascimento,
       });
 
-      const { orderId } = orderResponse.data;
+      const { paymentUrl } = response.data;
 
-      if (!orderId) {
-        throw new Error("orderId não retornado");
+      if (!paymentUrl) {
+        throw new Error("URL de pagamento não retornada pelo backend");
       }
 
-      /* ---------- 2. CRIA PAGAMENTO ---------- */
-      const pagamentoResponse = await api.post("/pagamento", {
-        orderId,
-      });
-
-      const { pagamento } = pagamentoResponse.data;
-
-      if (!pagamento?.init_point) {
-        throw new Error("Link de pagamento não retornado");
-      }
-
-      /* ---------- 3. REDIRECT ---------- */
-      window.location.href = pagamento.init_point;
-    } catch (error: any) {
+      window.location.href = paymentUrl;
+    } catch (error) {
       console.error(error);
-      setErro(
-        "Erro ao iniciar pagamento. Tente novamente em instantes."
-      );
+      setErro("Erro ao iniciar pagamento. Tente novamente.");
       setLoading(false);
     }
   }
@@ -134,7 +117,8 @@ export function FormDadosCliente({
           <h2 className="text-xl font-bold">Informe seus dados</h2>
 
           <p className="text-sm text-gray-400">
-            Seus dados serão usados para personalizar sua leitura.
+            Essas informações são necessárias para personalizar sua leitura
+            antes do pagamento.
           </p>
 
           <input
@@ -184,6 +168,10 @@ export function FormDadosCliente({
               {erro}
             </p>
           )}
+
+          <p className="text-xs text-gray-400 text-center">
+            Você será direcionado ao pagamento após confirmar seus dados.
+          </p>
 
           <div className="flex gap-3 pt-2">
             <Button
