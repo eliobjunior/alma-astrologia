@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PAYMENT_PROVIDERS } from "@/data/paymentProviders";
+import { api } from "@/services/api";
 
 interface FormDadosClienteProps {
-  produtoId: string; // 🔑 CHAVE TÉCNICA (EX: mapa_astral_personalizado)
+  produtoId: string;
   onClose: () => void;
 }
 
@@ -30,7 +30,6 @@ export function FormDadosCliente({
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
 
-    // Máscara de data dd/mm/aaaa
     if (name === "dataNascimento") {
       const onlyNumbers = value.replace(/\D/g, "");
       let formatted = onlyNumbers;
@@ -59,7 +58,6 @@ export function FormDadosCliente({
     if (!form.email) camposFaltantes.push("E-mail");
     if (!form.dataNascimento || form.dataNascimento.length !== 10)
       camposFaltantes.push("Data de nascimento");
-    if (!form.horaNascimento) camposFaltantes.push("Hora do nascimento");
     if (!form.cidadeNascimento)
       camposFaltantes.push("Cidade de nascimento");
 
@@ -74,26 +72,55 @@ export function FormDadosCliente({
     return true;
   }
 
-  function handlePagar() {
+  /* =========================
+     FLUXO PRINCIPAL
+     1. POST /orders
+     2. POST /pagamento
+     3. Redirect Mercado Pago
+  ========================= */
+
+  async function handlePagar() {
     if (!validarFormulario()) return;
-
-    // 🔗 BUSCA CORRETA PELO ID DO PRODUTO
-    const payment = PAYMENT_PROVIDERS[produtoId];
-
-    const url =
-      payment?.avulso ||
-      payment?.mensal ||
-      payment?.semestral;
-
-    if (!url) {
-      setErro("Link de pagamento indisponível para este produto.");
-      return;
-    }
 
     setLoading(true);
 
-    // ✅ REDIRECIONAMENTO DIRETO PARA O MERCADO PAGO
-    window.location.href = url;
+    try {
+      /* ---------- 1. CRIA ORDER ---------- */
+      const orderResponse = await api.post("/orders", {
+        produtoId,
+        nome: form.nome,
+        email: form.email,
+        dataNascimento: form.dataNascimento,
+        horaNascimento: form.horaNascimento,
+        cidadeNascimento: form.cidadeNascimento,
+      });
+
+      const { orderId } = orderResponse.data;
+
+      if (!orderId) {
+        throw new Error("orderId não retornado");
+      }
+
+      /* ---------- 2. CRIA PAGAMENTO ---------- */
+      const pagamentoResponse = await api.post("/pagamento", {
+        orderId,
+      });
+
+      const { pagamento } = pagamentoResponse.data;
+
+      if (!pagamento?.init_point) {
+        throw new Error("Link de pagamento não retornado");
+      }
+
+      /* ---------- 3. REDIRECT ---------- */
+      window.location.href = pagamento.init_point;
+    } catch (error: any) {
+      console.error(error);
+      setErro(
+        "Erro ao iniciar pagamento. Tente novamente em instantes."
+      );
+      setLoading(false);
+    }
   }
 
   /* =========================
@@ -107,8 +134,7 @@ export function FormDadosCliente({
           <h2 className="text-xl font-bold">Informe seus dados</h2>
 
           <p className="text-sm text-gray-400">
-            Essas informações são necessárias para personalizar sua leitura
-            antes do pagamento.
+            Seus dados serão usados para personalizar sua leitura.
           </p>
 
           <input
@@ -140,7 +166,6 @@ export function FormDadosCliente({
           <input
             name="horaNascimento"
             type="time"
-            placeholder="Hora do Nascimento"
             value={form.horaNascimento}
             onChange={handleChange}
             className="w-full p-3 rounded bg-[#05040D] border border-[#333]"
@@ -159,10 +184,6 @@ export function FormDadosCliente({
               {erro}
             </p>
           )}
-
-          <p className="text-xs text-gray-400 text-center">
-            Você será direcionado ao pagamento após confirmar seus dados.
-          </p>
 
           <div className="flex gap-3 pt-2">
             <Button
