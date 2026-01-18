@@ -30,7 +30,7 @@ export function FormDadosCliente({
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
 
-    // Máscara de data dd/mm/aaaa (mantida)
+    // Máscara de data (dd/mm/aaaa)
     if (name === "dataNascimento") {
       const onlyNumbers = value.replace(/\D/g, "");
       let formatted = onlyNumbers;
@@ -75,32 +75,53 @@ export function FormDadosCliente({
     return true;
   }
 
+  /**
+   * 🔥 HANDLE PAGAR (ÚNICO E DEFINITIVO)
+   * 1. Envia form para backend
+   * 2. Backend salva no BD
+   * 3. Backend cria pagamento
+   * 4. Front redireciona para o gateway
+   */
   async function handlePagar() {
     if (!validarFormulario()) return;
 
     try {
       setLoading(true);
+      setErro(null);
 
-      // 1️⃣ Cria pedido (antes do pagamento)
+      // 1️⃣ Envia dados do formulário (SALVA NO BANCO)
       const orderResponse = await api.post("/orders", {
         produtoId,
-        ...form,
+        nome: form.nome,
+        email: form.email,
+        dataNascimento: form.dataNascimento,
+        horaNascimento: form.horaNascimento,
+        cidadeNascimento: form.cidadeNascimento,
       });
 
       const { orderId } = orderResponse.data;
 
-      // 2️⃣ Cria pagamento
+      if (!orderId) {
+        throw new Error("OrderId não retornado pelo backend");
+      }
+
+      // 2️⃣ Backend gera pagamento (Mercado Pago)
       const pagamentoResponse = await api.post("/pagamento", {
         produtoId,
         orderId,
-        dadosCliente: form,
       });
 
-      // 3️⃣ Redireciona Mercado Pago
-      window.location.href =
-        pagamentoResponse.data.pagamento.init_point;
+      const initPoint =
+        pagamentoResponse.data?.pagamento?.init_point;
+
+      if (!initPoint) {
+        throw new Error("Link de pagamento inválido");
+      }
+
+      // 3️⃣ Redireciona usuário (web + mobile)
+      window.location.assign(initPoint);
     } catch (error) {
-      console.error(error);
+      console.error("Erro no pagamento:", error);
       setErro("Erro ao iniciar pagamento. Tente novamente.");
     } finally {
       setLoading(false);
@@ -141,20 +162,26 @@ export function FormDadosCliente({
 
           <input
             name="dataNascimento"
-            placeholder="Data de Nascimento (dd/mm/aaaa)"
+            placeholder="Data de nascimento (dd/mm/aaaa)"
             value={form.dataNascimento}
             onChange={handleChange}
             maxLength={10}
             className="w-full p-3 rounded bg-[#05040D] border border-[#333]"
           />
 
-          {/* Campo de hora – ícone funciona no mobile */}
           <input
             name="horaNascimento"
             type="time"
             value={form.horaNascimento}
             onChange={handleChange}
-            className="w-full p-3 rounded bg-[#05040D] border border-[#333]"
+            className="
+              w-full p-3 rounded
+              bg-[#05040D]
+              border border-[#333]
+              text-white
+              [color-scheme:dark]
+              appearance-auto
+            "
           />
 
           <input
