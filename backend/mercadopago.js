@@ -28,17 +28,9 @@ if (!ACCESS_TOKEN) {
  * ======================================================
  * criarPagamento
  * ======================================================
- * Cria uma Preference no Mercado Pago e retorna init_point.
- *
- * Esperado:
- * - produto: { title|nome|name, preco_cents|price|preco }
- * - orderId: id do pedido no seu banco (curto/numérico)
- * - customer: { name, email }
- *
- * Retorna:
- * - { id, init_point, sandbox_init_point }
  */
 export async function criarPagamento({ produto, orderId, customer }) {
+  if (!ACCESS_TOKEN) throw new Error("MP_ACCESS_TOKEN ausente no backend");
   if (!produto) throw new Error("Produto é obrigatório");
   if (!orderId) throw new Error("orderId é obrigatório");
   if (!customer?.email) throw new Error("customer.email é obrigatório");
@@ -73,17 +65,14 @@ export async function criarPagamento({ produto, orderId, customer }) {
       email: customer.email,
     },
 
-    // ✅ Padronizado: o webhook vai extrair orderId daqui
     external_reference: `order:${orderId}`,
 
-    // ✅ URL pública HTTPS do seu webhook no backend
     notification_url: notificationUrl,
 
-    // ✅ para o MP redirecionar o usuário após o checkout
     back_urls: {
-      success: process.env.FRONTEND_SUCCESS_URL,
-      failure: process.env.FRONTEND_FAILURE_URL,
-      pending: process.env.FRONTEND_PENDING_URL,
+      success: process.env.FRONTEND_SUCCESS_URL || "https://almaliraramos.com.br/sucesso",
+      failure: process.env.FRONTEND_FAILURE_URL || "https://almaliraramos.com.br/erro",
+      pending: process.env.FRONTEND_PENDING_URL || "https://almaliraramos.com.br/pendente",
     },
 
     auto_return: "approved",
@@ -93,13 +82,13 @@ export async function criarPagamento({ produto, orderId, customer }) {
     const response = await mercadopago.preferences.create(preference);
 
     return {
-      id: response.body?.id, // id da preference
+      id: response.body?.id,
       init_point: response.body?.init_point,
       sandbox_init_point: response.body?.sandbox_init_point,
     };
   } catch (error) {
     console.log("========== ERRO MERCADO PAGO (RAW) ==========");
-    console.log(error);
+    console.log(error?.message || error);
     console.log("========== RESPONSE.DATA ==========");
     console.log(error?.response?.data);
     console.log("========== RESPONSE.STATUS ==========");

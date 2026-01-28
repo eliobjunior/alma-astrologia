@@ -42,7 +42,8 @@ export const PRODUTOS = [
     ativo: true,
   },
   {
-    id: "numerologia_mapa_do_ano",
+    // CORRIGIDO (antes: numerologia_mapa_do_ano)
+    id: "numerologia_mapa_ano",
     titulo: "Numerologia – Mapa do Ano",
     descricao: "A vibração numerológica que irá guiar seu ano.",
     imagem: "/Images/thumbnails/NUMEROLOGIA - MAPA DO ANO-thumb.webp",
@@ -70,28 +71,32 @@ export const PRODUTOS = [
     ativo: true,
   },
   {
-    id: "diagnostico_do_amor",
+    // CORRIGIDO (antes: diagnostico_do_amor)
+    id: "diagnostico_amor",
     titulo: "Diagnóstico do Amor",
     descricao: "Descubra como sua energia afetiva está atuando.",
     imagem: "/Images/thumbnails/DIAGNOSTICO DO AMOR-thumb.webp",
     ativo: true,
   },
   {
-    id: "analise_secreta_do_signo",
+    // CORRIGIDO (antes: analise_secreta_do_signo)
+    id: "analise_secreta_signo",
     titulo: "Análise Secreta do Seu Signo",
     descricao: "Revelações profundas sobre sua energia única.",
     imagem: "/Images/thumbnails/ANALISE SECRETA DO SEU SIGNO-thumb.webp",
     ativo: true,
   },
   {
-    id: "seu_ano_em_3_palavras",
+    // CORRIGIDO (antes: seu_ano_em_3_palavras)
+    id: "seu_ano_3_palavras",
     titulo: "Seu Ano em 3 Palavras",
     descricao: "Os três pilares que vão guiar seu próximo ano.",
     imagem: "/Images/thumbnails/SEU ANO EM 3 PALAVRAS-thumb.webp",
     ativo: true,
   },
   {
-    id: "missao_de_vida_2026",
+    // CORRIGIDO (antes: missao_de_vida_2026)
+    id: "missao_vida_2026",
     titulo: "Missão de Vida 2026",
     descricao: "Entenda seu propósito para 2026 com clareza espiritual.",
     imagem: "/Images/thumbnails/MISSAO DE VIDA - 2026-thumb.webp",
@@ -109,6 +114,6 @@ export const PRODUTOS = [
     titulo: "Terapia de Bem-Estar com I.A",
     descricao: "Sessões profundas assistidas por inteligência artificial.",
     imagem: "/Images/thumbnails/TERAPIA LEVE - BEM ESTAR-thumb.webp",
-    ativo: false, // DESATIVADO
+    ativo: false,
   },
 ];

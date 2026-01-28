@@ -28,10 +28,6 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
     cidadeNascimento: "",
   });
 
-  /* =========================
-     HELPERS
-  ========================= */
-
   function brToIsoDate(ddmmyyyy: string) {
     // "31/01/1990" -> "1990-01-31"
     const parts = ddmmyyyy.split("/");
@@ -42,10 +38,6 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
 
     return `${yyyy}-${mm}-${dd}`;
   }
-
-  /* =========================
-     HANDLERS
-  ========================= */
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
@@ -92,10 +84,10 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
   }
 
   /**
-   * 🔥 HANDLE PAGAR (ALINHADO COM O BACKEND ATUAL)
-   * 1) POST /orders  -> salva cliente + pedido (retorna orderId)
-   * 2) POST /pagamento -> cria pagamento Mercado Pago (retorna pagamento.init_point)
-   * 3) Front redireciona para init_point
+   * ✅ FLUXO CORRETO (PRODUÇÃO)
+   * 1) POST /orders  -> backend salva order + chama Mercado Pago
+   * 2) backend retorna { init_point }
+   * 3) front redireciona
    */
   async function handlePagar() {
     if (!validarFormulario()) return;
@@ -104,8 +96,7 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
       setLoading(true);
       setErro(null);
 
-      // 1) cria order (salva cliente + pedido)
-      const orderResp = await api.post("/orders", {
+      const resp = await api.post("/orders", {
         produtoId,
         nome: form.nome,
         email: form.email,
@@ -114,15 +105,7 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
         cidadeNascimento: form.cidadeNascimento,
       });
 
-      const orderId = orderResp.data?.orderId;
-      if (!orderId) {
-        throw new Error("orderId não retornado pelo backend");
-      }
-
-      // 2) cria pagamento
-      const pagResp = await api.post("/pagamento", { orderId });
-
-      const initPoint = pagResp.data?.pagamento?.init_point;
+      const initPoint = resp.data?.init_point;
       if (!initPoint) {
         throw new Error("init_point não retornado pelo backend");
       }
@@ -135,10 +118,6 @@ export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) 
       setLoading(false);
     }
   }
-
-  /* =========================
-     RENDER
-  ========================= */
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-4">

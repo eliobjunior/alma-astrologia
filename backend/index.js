@@ -6,17 +6,12 @@ import { Pool } from "pg";
 import { PRODUCTS } from "./products.js";
 import { criarPagamento } from "./mercadopago.js";
 
-/**
- * ======================================================
- * APP
- * ======================================================
- */
 const app = express();
-const PORT = Number(process.env.PORT || 3333);
+const PORT = Number(process.env.PORT || 3000);
 
 /**
  * ======================================================
- * MIDDLEWARES
+ * CORS
  * ======================================================
  */
 const allowedOrigins = [
@@ -29,10 +24,11 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, cb) => {
-      // permite curl/postman e server-to-server
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(null, true); // se quiser travar: cb(new Error("Not allowed by CORS"))
+      // Se quiser travar de verdade, troque para:
+      // return cb(new Error("Not allowed by CORS"));
+      return cb(null, true);
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -46,30 +42,25 @@ app.use(express.json({ limit: "1mb" }));
 /**
  * ======================================================
  * DB (Postgres)
- * Env esperado:
- *  DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+ * Preferência: DATABASE_URL
  * ======================================================
  */
-const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || "alma_ramos",
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "",
-});
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  : new Pool({
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT || 5432),
+      database: process.env.DB_NAME || "alma_ramos",
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "",
+    });
 
 /**
  * ======================================================
  * MIGRATION LIGHT (idempotente)
- * - não quebra se já existir
- * - adiciona colunas necessárias para:
- *   - salvar dados do cliente
- *   - vincular pagamento MP
- *   - rastrear produto/tipo/valor
  * ======================================================
  */
 async function ensureSchema() {
-  // tabela base
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.orders (
       id BIGSERIAL PRIMARY KEY,
@@ -95,7 +86,6 @@ async function ensureSchema() {
     );
   `);
 
-  // colunas (caso seu schema antigo seja diferente)
   await pool.query(`
     DO $$
     BEGIN
@@ -178,7 +168,6 @@ async function ensureSchema() {
     END $$;
   `);
 
-  // trigger updated_at
   await pool.query(`
     DO $$
     BEGIN
@@ -201,8 +190,9 @@ async function ensureSchema() {
     END $$;
   `);
 
-  // índices úteis
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`
+  );
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_email ON public.orders(email);`);
 }
 
@@ -211,12 +201,8 @@ async function ensureSchema() {
  * HELPERS
  * ======================================================
  */
-
 function normalizeFrontPayload(body) {
-  // FRONT atual manda exatamente:
-  // { produtoId, nome, email, dataNascimento, horaNascimento, cidadeNascimento }
   const produtoId = body?.produtoId || body?.productId || body?.produto_id;
-
   if (!produtoId) return null;
 
   const client = {
@@ -233,39 +219,36 @@ function normalizeFrontPayload(body) {
 function resolveProductId(produtoId) {
   if (PRODUCTS[produtoId]) return produtoId;
 
-  // alias comum que já apareceu nos seus testes
+  // Alias (mantém compat com IDs antigos do front)
   const aliasMap = {
     seu_ano_em_3_palavras: "seu_ano_3_palavras",
+    numerologia_mapa_do_ano: "numerologia_mapa_ano",
+    diagnostico_do_amor: "diagnostico_amor",
+    analise_secreta_do_signo: "analise_secreta_signo",
+    missao_de_vida_2026: "missao_vida_2026",
   };
 
   if (aliasMap[produtoId] && PRODUCTS[aliasMap[produtoId]]) return aliasMap[produtoId];
-
   return produtoId;
 }
 
 function parseOrderIdFromExternalRef(externalRef) {
   if (!externalRef) return null;
 
-  // caso 1: "order:123"
   if (typeof externalRef === "string" && externalRef.startsWith("order:")) {
     const n = Number(externalRef.replace("order:", ""));
     return Number.isFinite(n) ? n : null;
   }
 
-  // caso 2: "123"
   if (typeof externalRef === "string" && /^[0-9]+$/.test(externalRef.trim())) {
     const n = Number(externalRef.trim());
     return Number.isFinite(n) ? n : null;
   }
 
-  // caso 3: JSON antigo (caso ainda tenha)
-  // {"orderId":123,...} ou {"produtoId":...,"dadosCliente":...}
   try {
     const obj = JSON.parse(externalRef);
     if (obj?.orderId && Number.isFinite(Number(obj.orderId))) return Number(obj.orderId);
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
 
   return null;
 }
@@ -283,7 +266,6 @@ function mpPaymentToOrderStatus(mpStatus) {
  * ROUTES
  * ======================================================
  */
-
 app.get("/health", async (req, res) => {
   try {
     const r = await pool.query("SELECT 1 as ok");
@@ -306,9 +288,7 @@ app.get("/health", async (req, res) => {
 /**
  * ======================================================
  * CHECKOUT (ÚNICO)
- * - salva dados do form no BD
- * - cria pagamento (preference) no MP
- * - retorna init_point e orderId
+ * POST /orders | POST /checkout
  * ======================================================
  */
 async function checkoutHandler(req, res) {
@@ -322,7 +302,7 @@ async function checkoutHandler(req, res) {
         produtoId: "string",
         nome: "string",
         email: "string",
-        dataNascimento: "dd/mm/aaaa",
+        dataNascimento: "yyyy-mm-dd ou dd/mm/aaaa (front manda yyyy-mm-dd)",
         horaNascimento: "HH:mm",
         cidadeNascimento: "string",
       },
@@ -351,11 +331,10 @@ async function checkoutHandler(req, res) {
 
   const { client } = normalized;
 
-  // valida campos obrigatórios (igual ao front)
   const missing = [];
   if (!client.nome) missing.push("nome");
   if (!client.email) missing.push("email");
-  if (!client.dataNascimento || client.dataNascimento.length !== 10) missing.push("dataNascimento");
+  if (!client.dataNascimento) missing.push("dataNascimento");
   if (!client.horaNascimento) missing.push("horaNascimento");
   if (!client.cidadeNascimento) missing.push("cidadeNascimento");
 
@@ -367,7 +346,6 @@ async function checkoutHandler(req, res) {
     });
   }
 
-  // preço (centavos) obrigatório para gerar preference
   if (typeof produto.preco_cents !== "number" || produto.preco_cents <= 0) {
     return res.status(500).json({
       status: "error",
@@ -387,6 +365,7 @@ async function checkoutHandler(req, res) {
   };
 
   const dbClient = await pool.connect();
+
   try {
     await dbClient.query("BEGIN");
 
@@ -399,14 +378,7 @@ async function checkoutHandler(req, res) {
           ($1, $2, $3, $4, 'BRL', $5, $6, 'created')
         RETURNING id;
       `,
-      [
-        produtoIdResolved,
-        produto.titulo,
-        produto.tipo,
-        amountCents,
-        client.email,
-        clientDb,
-      ]
+      [produtoIdResolved, produto.titulo, produto.tipo, amountCents, client.email, clientDb]
     );
 
     const orderId = insert.rows[0].id;
@@ -420,20 +392,11 @@ async function checkoutHandler(req, res) {
 
     await dbClient.query("COMMIT");
 
-    // 3) cria pagamento no MP (preference)
-    // OBS: mensal com preapproval_plan é outro fluxo; aqui seguimos com preference (pagamento único).
+    // 3) cria preference no MP
     const pagamento = await criarPagamento({
-      produto: {
-        title: produto.titulo,
-        preco_cents: produto.preco_cents,
-      },
-      orderId, // o mercadopago.js deve usar isso como external_reference curto
-      customer: {
-        name: client.nome,
-        email: client.email,
-      },
-      // se seu mercadopago.js aceitar external_reference explicitamente, você pode passar também:
-      // external_reference,
+      produto: { title: produto.titulo, preco_cents: produto.preco_cents },
+      orderId,
+      customer: { name: client.nome, email: client.email },
     });
 
     if (!pagamento?.init_point) {
@@ -444,7 +407,7 @@ async function checkoutHandler(req, res) {
       });
     }
 
-    // 4) salva metadados MP no BD
+    // 4) salva dados MP
     await pool.query(
       `
         UPDATE public.orders
@@ -456,7 +419,7 @@ async function checkoutHandler(req, res) {
       [pagamento?.id || null, pagamento.init_point, orderId]
     );
 
-    // 5) responde pro front
+    // 5) responde pro front (formato que o front usa)
     return res.json({
       status: "success",
       orderId,
@@ -481,46 +444,37 @@ async function checkoutHandler(req, res) {
   }
 }
 
-// Rotas compatíveis
 app.post("/checkout", checkoutHandler);
 app.post("/orders", checkoutHandler);
 
 /**
  * ======================================================
  * WEBHOOK MERCADO PAGO
- * - recebe { type: "payment", data: { id } } (body ou query)
- * - consulta pagamento no MP
- * - atualiza order e dispara n8n se aprovado
- *
- * Requisitos:
- * - MP_WEBHOOK_URL apontando para: https://api.../webhook/mercadopago
- * - MP_ACCESS_TOKEN setado
  * ======================================================
  */
 app.post("/webhook/mercadopago", async (req, res) => {
-  // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
     const type = req.body?.type || req.query?.type;
     const dataId =
-      req.body?.data?.id ||
-      req.query?.["data.id"] ||
-      req.query?.id ||
-      null;
+      req.body?.data?.id || req.query?.["data.id"] || req.query?.id || null;
 
     if (type !== "payment" || !dataId) {
       console.warn("Webhook ignorado (sem type=payment ou sem data.id)", { type, dataId });
       return;
     }
 
-    const token = process.env.MP_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const token =
+      process.env.MP_ACCESS_TOKEN ||
+      process.env.MERCADOPAGO_ACCESS_TOKEN ||
+      process.env.MP_TOKEN;
+
     if (!token) {
       console.error("MP_ACCESS_TOKEN não configurado; não dá pra consultar pagamento.");
       return;
     }
 
-    // Node 18+ tem fetch nativo
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
       method: "GET",
       headers: {
@@ -546,7 +500,6 @@ app.post("/webhook/mercadopago", async (req, res) => {
 
     const newOrderStatus = mpPaymentToOrderStatus(mpStatus) || "payment_pending";
 
-    // atualiza order
     await pool.query(
       `
         UPDATE public.orders
@@ -558,13 +511,11 @@ app.post("/webhook/mercadopago", async (req, res) => {
       [String(dataId), mpStatus, newOrderStatus, orderId]
     );
 
-    // só dispara n8n quando aprovado/authorized
     if (!["approved", "authorized"].includes(mpStatus)) {
       console.log("Pagamento não aprovado ainda. Ignorando disparo n8n.", { orderId, mpStatus });
       return;
     }
 
-    // busca dados do pedido (com cliente)
     const orderRes = await pool.query(
       `
         SELECT id, product_id, product_title, product_type, amount_cents, currency,
