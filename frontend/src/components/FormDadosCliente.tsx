@@ -8,20 +8,40 @@ interface FormDadosClienteProps {
   onClose: () => void;
 }
 
-export function FormDadosCliente({
-  produtoId,
-  onClose,
-}: FormDadosClienteProps) {
+type FormState = {
+  nome: string;
+  email: string;
+  dataNascimento: string; // dd/mm/aaaa (no input)
+  horaNascimento: string; // HH:mm
+  cidadeNascimento: string;
+};
+
+export function FormDadosCliente({ produtoId, onClose }: FormDadosClienteProps) {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormState>({
     nome: "",
     email: "",
     dataNascimento: "",
     horaNascimento: "",
     cidadeNascimento: "",
   });
+
+  /* =========================
+     HELPERS
+  ========================= */
+
+  function brToIsoDate(ddmmyyyy: string) {
+    // "31/01/1990" -> "1990-01-31"
+    const parts = ddmmyyyy.split("/");
+    if (parts.length !== 3) return ddmmyyyy;
+
+    const [dd, mm, yyyy] = parts;
+    if (!dd || !mm || !yyyy) return ddmmyyyy;
+
+    return `${yyyy}-${mm}-${dd}`;
+  }
 
   /* =========================
      HANDLERS
@@ -45,11 +65,11 @@ export function FormDadosCliente({
         )}/${onlyNumbers.slice(4, 8)}`;
       }
 
-      setForm({ ...form, dataNascimento: formatted });
+      setForm((prev) => ({ ...prev, dataNascimento: formatted }));
       return;
     }
 
-    setForm({ ...form, [name]: value });
+    setForm((prev) => ({ ...prev, [name]: value } as FormState));
   }
 
   function validarFormulario(): boolean {
@@ -59,15 +79,11 @@ export function FormDadosCliente({
     if (!form.email) camposFaltantes.push("E-mail");
     if (!form.dataNascimento || form.dataNascimento.length !== 10)
       camposFaltantes.push("Data de nascimento");
-    if (!form.horaNascimento)
-      camposFaltantes.push("Hora do nascimento");
-    if (!form.cidadeNascimento)
-      camposFaltantes.push("Cidade de nascimento");
+    if (!form.horaNascimento) camposFaltantes.push("Hora do nascimento");
+    if (!form.cidadeNascimento) camposFaltantes.push("Cidade de nascimento");
 
     if (camposFaltantes.length > 0) {
-      setErro(
-        `Preencha os seguintes campos: ${camposFaltantes.join(", ")}.`
-      );
+      setErro(`Preencha os seguintes campos: ${camposFaltantes.join(", ")}.`);
       return false;
     }
 
@@ -76,11 +92,10 @@ export function FormDadosCliente({
   }
 
   /**
-   * 🔥 HANDLE PAGAR (ÚNICO E DEFINITIVO)
-   * 1. Envia form para backend
-   * 2. Backend salva no BD
-   * 3. Backend cria pagamento
-   * 4. Front redireciona para o gateway
+   * 🔥 HANDLE PAGAR (ALINHADO COM O BACKEND ATUAL)
+   * 1) POST /orders  -> salva cliente + pedido (retorna orderId)
+   * 2) POST /pagamento -> cria pagamento Mercado Pago (retorna pagamento.init_point)
+   * 3) Front redireciona para init_point
    */
   async function handlePagar() {
     if (!validarFormulario()) return;
@@ -89,36 +104,29 @@ export function FormDadosCliente({
       setLoading(true);
       setErro(null);
 
-      // 1️⃣ Envia dados do formulário (SALVA NO BANCO)
-      const orderResponse = await api.post("/orders", {
+      // 1) cria order (salva cliente + pedido)
+      const orderResp = await api.post("/orders", {
         produtoId,
         nome: form.nome,
         email: form.email,
-        dataNascimento: form.dataNascimento,
-        horaNascimento: form.horaNascimento,
+        dataNascimento: brToIsoDate(form.dataNascimento),
+        horaNascimento: form.horaNascimento || null,
         cidadeNascimento: form.cidadeNascimento,
       });
 
-      const { orderId } = orderResponse.data;
-
+      const orderId = orderResp.data?.orderId;
       if (!orderId) {
-        throw new Error("OrderId não retornado pelo backend");
+        throw new Error("orderId não retornado pelo backend");
       }
 
-      // 2️⃣ Backend gera pagamento (Mercado Pago)
-      const pagamentoResponse = await api.post("/pagamento", {
-        produtoId,
-        orderId,
-      });
+      // 2) cria pagamento
+      const pagResp = await api.post("/pagamento", { orderId });
 
-      const initPoint =
-        pagamentoResponse.data?.pagamento?.init_point;
-
+      const initPoint = pagResp.data?.pagamento?.init_point;
       if (!initPoint) {
-        throw new Error("Link de pagamento inválido");
+        throw new Error("init_point não retornado pelo backend");
       }
 
-      // 3️⃣ Redireciona usuário (web + mobile)
       window.location.assign(initPoint);
     } catch (error) {
       console.error("Erro no pagamento:", error);
@@ -139,8 +147,8 @@ export function FormDadosCliente({
           <h2 className="text-xl font-bold">Informe seus dados</h2>
 
           <p className="text-sm text-gray-400">
-            Essas informações são necessárias para personalizar sua leitura
-            antes do pagamento.
+            Essas informações são necessárias para personalizar sua leitura antes
+            do pagamento.
           </p>
 
           <input
@@ -192,11 +200,7 @@ export function FormDadosCliente({
             className="w-full p-3 rounded bg-[#05040D] border border-[#333]"
           />
 
-          {erro && (
-            <p className="text-sm text-red-400 text-center">
-              {erro}
-            </p>
-          )}
+          {erro && <p className="text-sm text-red-400 text-center">{erro}</p>}
 
           <p className="text-xs text-gray-400 text-center">
             Você será direcionado ao pagamento após confirmar seus dados.

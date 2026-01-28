@@ -10,15 +10,50 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 type TipoCheckout = "avulso" | "mensal" | "semestral";
 
+/**
+ * Backend (curl já validado):
+ * POST /checkout
+ * Espera no mínimo: title, price, email
+ * Retorna: init_point
+ */
 interface CheckoutPayload {
+  title: string;
+  price: number;
+  email: string;
+
+  // extras (opcionais, mas úteis para BD/n8n)
   produto: string;
   tipo: TipoCheckout;
   nome: string;
-  email: string;
   data_nascimento: string;
   hora_nascimento: string;
   cidade: string;
   pais: string;
+}
+
+function getProductFromSlug(slug: string, tipo: TipoCheckout): { title: string; price: number } {
+  // ✅ Ajuste os valores conforme sua tabela real de produtos/planos.
+  // Se você já tem lista central de produtos (ex: data/products), podemos trocar isso depois.
+  const normalized = (slug || "").toLowerCase();
+
+  // exemplos seguros (não quebram o fluxo): se não achar, cai no default.
+  const catalog: Record<string, { title: string; price: number }> = {
+    "mapa-astral-personalizado": { title: "Mapa Astral Personalizado", price: 14.0 },
+    "plano-total-mensal": { title: "Plano Total Mensal", price: 29.9 },
+  };
+
+  const base = catalog[normalized] ?? { title: slug || "Produto", price: 14.0 };
+
+  // se quiser variar preço por tipo (avulso/mensal/semestral), faz aqui:
+  if (tipo === "semestral") {
+    // exemplo: 6x mensal com desconto (ajuste depois)
+    return { title: `${base.title} (Semestral)`, price: base.price * 6 };
+  }
+  if (tipo === "mensal") {
+    return { title: `${base.title} (Mensal)`, price: base.price };
+  }
+
+  return { title: base.title, price: base.price };
 }
 
 export default function CheckoutForm() {
@@ -37,11 +72,19 @@ export default function CheckoutForm() {
 
     const formData = new FormData(e.currentTarget);
 
+    const slug = produtoSlug || "";
+    const product = getProductFromSlug(slug, tipo);
+
     const payload: CheckoutPayload = {
-      produto: produtoSlug || "",
+      // ✅ mínimos do backend validado por curl
+      title: product.title,
+      price: product.price,
+      email: String(formData.get("email")),
+
+      // extras
+      produto: slug,
       tipo,
       nome: String(formData.get("nome")),
-      email: String(formData.get("email")),
       data_nascimento: String(formData.get("data_nascimento")),
       hora_nascimento: String(formData.get("hora_nascimento")),
       cidade: String(formData.get("cidade")),
@@ -49,24 +92,31 @@ export default function CheckoutForm() {
     };
 
     try {
-      const response = await fetch(`${API_URL}/api/checkout`, {
+      // ✅ ROTA CORRETA (sem /api)
+      const response = await fetch(`${API_URL}/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        throw new Error("Erro ao iniciar pagamento");
+        // tenta ler corpo pra facilitar debug
+        const txt = await response.text().catch(() => "");
+        throw new Error(txt || "Erro ao iniciar pagamento");
       }
 
       const data = await response.json();
 
-      if (!data?.payment_url) {
-        throw new Error("Link de pagamento não retornado");
+      // ✅ backend retorna init_point
+      const initPoint =
+        data?.init_point || data?.pagamento?.init_point || data?.initPoint;
+
+      if (!initPoint) {
+        throw new Error("Link de pagamento não retornado (init_point)");
       }
 
       // 🔁 Redireciona para Mercado Pago
-      window.location.href = data.payment_url;
+      window.location.href = initPoint;
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Erro inesperado");
