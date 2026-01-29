@@ -3,8 +3,8 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { Pool } from "pg";
-import { PRODUCTS } from "./products.js";
-import { criarPagamento } from "./mercadopago.js";
+import { getProduct, resolveProductId, isActiveProduct, priceFromCents } from "./products.js";
+import { criarPagamento, mpStatus } from "./mercadopago.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -26,8 +26,6 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      // Se quiser travar de verdade, troque para:
-      // return cb(new Error("Not allowed by CORS"));
       return cb(null, true);
     },
     methods: ["GET", "POST", "OPTIONS"],
@@ -90,88 +88,8 @@ async function ensureSchema() {
     DO $$
     BEGIN
       IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='client_json'
+        SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders'
       ) THEN
-        ALTER TABLE public.orders ADD COLUMN client_json JSONB;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='product_id'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN product_id TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='product_title'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN product_title TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='product_type'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN product_type TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='amount_cents'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN amount_cents INTEGER;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='currency'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN currency TEXT DEFAULT 'BRL';
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='mp_preference_id'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN mp_preference_id TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='mp_init_point'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN mp_init_point TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_id'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN mp_payment_id TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_status'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN mp_payment_status TEXT;
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema='public' AND table_name='orders' AND column_name='external_reference'
-      ) THEN
-        ALTER TABLE public.orders ADD COLUMN external_reference TEXT;
-      END IF;
-    END $$;
-  `);
-
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders') THEN
         CREATE OR REPLACE FUNCTION set_updated_at_orders()
         RETURNS trigger AS $fn$
         BEGIN
@@ -181,7 +99,9 @@ async function ensureSchema() {
         $fn$ LANGUAGE plpgsql;
       END IF;
 
-      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders') THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders'
+      ) THEN
         CREATE TRIGGER trg_set_updated_at_orders
         BEFORE UPDATE ON public.orders
         FOR EACH ROW
@@ -216,22 +136,6 @@ function normalizeFrontPayload(body) {
   return { produtoId: String(produtoId), client };
 }
 
-function resolveProductId(produtoId) {
-  if (PRODUCTS[produtoId]) return produtoId;
-
-  // Alias (mantém compat com IDs antigos do front)
-  const aliasMap = {
-    seu_ano_em_3_palavras: "seu_ano_3_palavras",
-    numerologia_mapa_do_ano: "numerologia_mapa_ano",
-    diagnostico_do_amor: "diagnostico_amor",
-    analise_secreta_do_signo: "analise_secreta_signo",
-    missao_de_vida_2026: "missao_vida_2026",
-  };
-
-  if (aliasMap[produtoId] && PRODUCTS[aliasMap[produtoId]]) return aliasMap[produtoId];
-  return produtoId;
-}
-
 function parseOrderIdFromExternalRef(externalRef) {
   if (!externalRef) return null;
 
@@ -254,7 +158,7 @@ function parseOrderIdFromExternalRef(externalRef) {
 }
 
 function mpPaymentToOrderStatus(mpStatus) {
-  if (!mpStatus) return null;
+  if (!mpStatus) return "payment_pending";
   if (["approved", "authorized"].includes(mpStatus)) return "paid";
   if (["rejected", "cancelled", "refunded", "charged_back"].includes(mpStatus)) return "failed";
   if (["in_process", "pending"].includes(mpStatus)) return "payment_pending";
@@ -266,13 +170,14 @@ function mpPaymentToOrderStatus(mpStatus) {
  * ROUTES
  * ======================================================
  */
-app.get("/health", async (req, res) => {
+app.get("/health", async (_req, res) => {
   try {
     const r = await pool.query("SELECT 1 as ok");
     res.json({
       status: "ok",
       service: "alma-backend",
       db: r?.rows?.[0]?.ok === 1 ? "ok" : "unknown",
+      mp: mpStatus(),
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
@@ -302,7 +207,7 @@ async function checkoutHandler(req, res) {
         produtoId: "string",
         nome: "string",
         email: "string",
-        dataNascimento: "yyyy-mm-dd ou dd/mm/aaaa (front manda yyyy-mm-dd)",
+        dataNascimento: "yyyy-mm-dd",
         horaNascimento: "HH:mm",
         cidadeNascimento: "string",
       },
@@ -310,7 +215,7 @@ async function checkoutHandler(req, res) {
   }
 
   const produtoIdResolved = resolveProductId(normalized.produtoId);
-  const produto = PRODUCTS[produtoIdResolved];
+  const produto = getProduct(produtoIdResolved);
 
   if (!produto) {
     return res.status(400).json({
@@ -321,11 +226,24 @@ async function checkoutHandler(req, res) {
     });
   }
 
-  if (produto.status !== "ativo") {
+  if (!isActiveProduct(produto)) {
     return res.status(400).json({
       status: "error",
       message: "Produto inativo",
       produtoId: produtoIdResolved,
+    });
+  }
+
+  // IMPORTANTE: mensal (assinatura) tem webhook diferente (preapproval)
+  // Para não prometer automação errada, bloqueio aqui por enquanto.
+  if (produto.tipo === "mensal") {
+    return res.status(400).json({
+      status: "error",
+      message:
+        "Produto mensal (assinatura) requer webhook de preapproval. Este backend está configurado para pagamentos (payment) via preference.",
+      sugestao:
+        "Se quiser, eu gero a implementação de assinatura (preapproval) + webhook específico.",
+      checkout_url: produto?.payment?.mensal || null,
     });
   }
 
@@ -355,7 +273,7 @@ async function checkoutHandler(req, res) {
   }
 
   const amountCents = produto.preco_cents;
-  const price = amountCents / 100;
+  const price = priceFromCents(amountCents);
 
   const clientDb = {
     ...client,
@@ -394,7 +312,7 @@ async function checkoutHandler(req, res) {
 
     // 3) cria preference no MP
     const pagamento = await criarPagamento({
-      produto: { title: produto.titulo, preco_cents: produto.preco_cents },
+      produto: { titulo: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
       customer: { name: client.nome, email: client.email },
     });
@@ -419,7 +337,7 @@ async function checkoutHandler(req, res) {
       [pagamento?.id || null, pagamento.init_point, orderId]
     );
 
-    // 5) responde pro front (formato que o front usa)
+    // 5) responde pro front
     return res.json({
       status: "success",
       orderId,
@@ -449,19 +367,29 @@ app.post("/orders", checkoutHandler);
 
 /**
  * ======================================================
- * WEBHOOK MERCADO PAGO
+ * WEBHOOK MERCADO PAGO (payment)
  * ======================================================
+ *
+ * Aceita formatos comuns:
+ * - body: { type: "payment", data: { id } }
+ * - query: ?topic=payment&id=123
+ * - query: ?type=payment&data.id=123
  */
 app.post("/webhook/mercadopago", async (req, res) => {
+  // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
-    const type = req.body?.type || req.query?.type;
+    const type = req.body?.type || req.query?.type || req.query?.topic;
     const dataId =
-      req.body?.data?.id || req.query?.["data.id"] || req.query?.id || null;
+      req.body?.data?.id ||
+      req.query?.["data.id"] ||
+      req.query?.id ||
+      req.body?.id ||
+      null;
 
     if (type !== "payment" || !dataId) {
-      console.warn("Webhook ignorado (sem type=payment ou sem data.id)", { type, dataId });
+      console.warn("Webhook ignorado (não é payment ou sem id)", { type, dataId });
       return;
     }
 
@@ -475,6 +403,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
+    // Consulta pagamento (fonte de verdade)
     const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
       method: "GET",
       headers: {
@@ -489,7 +418,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const mpStatus = payment?.status || null;
+    const mpStatusValue = payment?.status || null;
     const externalRef = payment?.external_reference || null;
 
     const orderId = parseOrderIdFromExternalRef(externalRef);
@@ -498,8 +427,9 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const newOrderStatus = mpPaymentToOrderStatus(mpStatus) || "payment_pending";
+    const newOrderStatus = mpPaymentToOrderStatus(mpStatusValue);
 
+    // Atualiza pedido
     await pool.query(
       `
         UPDATE public.orders
@@ -508,19 +438,21 @@ app.post("/webhook/mercadopago", async (req, res) => {
             status = $3
         WHERE id = $4
       `,
-      [String(dataId), mpStatus, newOrderStatus, orderId]
+      [String(dataId), mpStatusValue, newOrderStatus, orderId]
     );
 
-    if (!["approved", "authorized"].includes(mpStatus)) {
-      console.log("Pagamento não aprovado ainda. Ignorando disparo n8n.", { orderId, mpStatus });
+    // Só dispara n8n quando aprovado/autorizado
+    if (!["approved", "authorized"].includes(mpStatusValue)) {
+      console.log("Pagamento ainda não aprovado. Não dispara n8n.", { orderId, mpStatusValue });
       return;
     }
 
+    // Busca pedido com dados do cliente
     const orderRes = await pool.query(
       `
         SELECT id, product_id, product_title, product_type, amount_cents, currency,
                email, client_json, status, mp_payment_id, mp_payment_status,
-               created_at, updated_at
+               external_reference, created_at, updated_at
         FROM public.orders
         WHERE id = $1
         LIMIT 1;
@@ -558,7 +490,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    console.log("✅ n8n disparado com sucesso", { orderId, mpStatus });
+    console.log("✅ n8n disparado com sucesso", { orderId, mpStatusValue });
   } catch (e) {
     console.error("Webhook handler error:", e?.message || e);
   }

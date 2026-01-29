@@ -1,9 +1,9 @@
 // backend/products.js
+
 export const PRODUCTS = {
   // ─────────────────────────────
   // PRODUTOS AVULSOS
   // ─────────────────────────────
-
   mapa_astral_personalizado: {
     titulo: "Mapa Astral Personalizado",
     tipo: "avulso",
@@ -161,12 +161,8 @@ export const PRODUCTS = {
 
   // ─────────────────────────────
   // PLANOS / ASSINATURAS
-  // Observação:
-  // - Para "mensal" via preapproval_plan, o webhook é diferente (preapproval).
-  // - Neste backend, ainda tratamos pagamento como preference (pagamento único),
-  //   mas os preços estão aqui para você decidir como quer fazer.
+  // (Webhook é diferente: preapproval). Não tratamos aqui como "payment".
   // ─────────────────────────────
-
   plano_total_mensal: {
     titulo: "Plano Total Mensal",
     tipo: "mensal",
@@ -201,3 +197,36 @@ export const PRODUCTS = {
     },
   },
 };
+
+// Aliases consolidados num lugar só
+const ALIAS_MAP = {
+  seu_ano_em_3_palavras: "seu_ano_3_palavras",
+  numerologia_mapa_do_ano: "numerologia_mapa_ano",
+  diagnostico_do_amor: "diagnostico_amor",
+  analise_secreta_do_signo: "analise_secreta_signo",
+  missao_de_vida_2026: "missao_vida_2026",
+};
+
+export function resolveProductId(produtoId) {
+  if (!produtoId) return null;
+  const id = String(produtoId);
+  if (PRODUCTS[id]) return id;
+  const aliased = ALIAS_MAP[id];
+  if (aliased && PRODUCTS[aliased]) return aliased;
+  return id; // devolve mesmo assim (para mensagem de erro ficar clara)
+}
+
+export function getProduct(produtoId) {
+  const resolved = resolveProductId(produtoId);
+  if (!resolved) return null;
+  return PRODUCTS[resolved] || null;
+}
+
+export function isActiveProduct(produto) {
+  return !!produto && produto.status === "ativo";
+}
+
+export function priceFromCents(preco_cents) {
+  if (typeof preco_cents !== "number" || preco_cents <= 0) return null;
+  return preco_cents / 100;
+}
