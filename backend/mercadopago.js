@@ -1,25 +1,37 @@
 // backend/mercadopago.js
 import "dotenv/config";
-import mercadopago from "mercadopago";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
 /**
  * Aceita QUALQUER uma dessas variáveis:
  * - MP_ACCESS_TOKEN (recomendado)
  * - MERCADOPAGO_ACCESS_TOKEN
- * - MP_TOKEN
- * - MERCADO_PAGO_ACCESS_TOKEN (compat com containers antigos)
+ * - MERCADO_PAGO_ACCESS_TOKEN (compat com setups antigos)
+ * - MP_TOKEN (fallback)
  */
 const ACCESS_TOKEN =
   process.env.MP_ACCESS_TOKEN ||
   process.env.MERCADOPAGO_ACCESS_TOKEN ||
-  process.env.MP_TOKEN ||
-  process.env.MERCADO_PAGO_ACCESS_TOKEN;
+  process.env.MERCADO_PAGO_ACCESS_TOKEN ||
+  process.env.MP_TOKEN;
 
 if (!ACCESS_TOKEN) {
-  console.warn("[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar.");
-} else {
-  mercadopago.configure({ access_token: ACCESS_TOKEN });
+  console.warn(
+    "[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar."
+  );
 }
+
+/**
+ * Cliente Mercado Pago (SDK novo)
+ */
+const mpClient = new MercadoPagoConfig({
+  accessToken: ACCESS_TOKEN || "NO_TOKEN",
+});
+
+/**
+ * Client de Preference (cria o link de pagamento)
+ */
+const preferenceClient = new Preference(mpClient);
 
 function getNotificationUrl() {
   return (
@@ -30,13 +42,18 @@ function getNotificationUrl() {
   );
 }
 
+/**
+ * Mantém a mesma assinatura do seu código atual.
+ * Retorna init_point para redirecionar o cliente.
+ */
 export async function criarPagamento({ produto, orderId, customer }) {
   if (!ACCESS_TOKEN) throw new Error("Access token do Mercado Pago ausente no backend");
   if (!produto) throw new Error("Produto é obrigatório");
   if (!orderId) throw new Error("orderId é obrigatório");
   if (!customer?.email) throw new Error("customer.email é obrigatório");
 
-  const title = produto.title || produto.titulo || produto.nome || produto.name || "Produto";
+  const title =
+    produto.title || produto.titulo || produto.nome || produto.name || "Produto";
 
   let unitPrice = null;
   if (typeof produto.preco_cents === "number") unitPrice = produto.preco_cents / 100;
@@ -49,23 +66,26 @@ export async function criarPagamento({ produto, orderId, customer }) {
 
   const notificationUrl = getNotificationUrl();
   if (!notificationUrl) {
-    console.warn("[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL).");
+    console.warn(
+      "[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL)."
+    );
   }
 
   const frontendBase = process.env.FRONTEND_URL || "https://almaliraramos.com.br";
 
-  const preference = {
+  // Preferência (SDK novo)
+  const body = {
     items: [
       {
         title,
         quantity: 1,
         currency_id: "BRL",
-        unit_price: unitPrice
-      }
+        unit_price: unitPrice,
+      },
     ],
     payer: {
       name: customer.name || customer.nome || "Cliente",
-      email: customer.email
+      email: customer.email,
     },
 
     // Elo pagamento <-> order no banco
@@ -77,25 +97,29 @@ export async function criarPagamento({ produto, orderId, customer }) {
     back_urls: {
       success: process.env.FRONTEND_SUCCESS_URL || `${frontendBase}/sucesso`,
       failure: process.env.FRONTEND_FAILURE_URL || `${frontendBase}/erro`,
-      pending: process.env.FRONTEND_PENDING_URL || `${frontendBase}/pendente`
+      pending: process.env.FRONTEND_PENDING_URL || `${frontendBase}/pendente`,
     },
 
-    auto_return: "approved"
+    auto_return: "approved",
   };
 
   try {
-    const response = await mercadopago.preferences.create(preference);
+    // SDK novo: preferenceClient.create({ body })
+    const res = await preferenceClient.create({ body });
+
+    // Algumas versões retornam { body: {...} }, outras já retornam o objeto direto
+    const pref = res?.body ?? res;
 
     return {
-      id: response.body?.id || null,
-      init_point: response.body?.init_point || null,
-      sandbox_init_point: response.body?.sandbox_init_point || null
+      id: pref?.id || null,
+      init_point: pref?.init_point || null,
+      sandbox_init_point: pref?.sandbox_init_point || null,
     };
   } catch (error) {
     console.log("========== ERRO MERCADO PAGO ==========");
     console.log("message:", error?.message);
-    console.log("status:", error?.response?.status);
-    console.log("data:", error?.response?.data);
+    console.log("status:", error?.status || error?.response?.status);
+    console.log("data:", error?.response?.data || error);
     console.log("======================================");
     throw error;
   }
