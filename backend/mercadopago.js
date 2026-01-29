@@ -3,63 +3,40 @@ import "dotenv/config";
 import mercadopago from "mercadopago";
 
 /**
- * Lê token aceitando nomes antigos e novos.
- * NÃO logue o token.
+ * Aceita QUALQUER uma dessas variáveis:
+ * - MP_ACCESS_TOKEN (recomendado)
+ * - MERCADOPAGO_ACCESS_TOKEN
+ * - MP_TOKEN
+ * - MERCADO_PAGO_ACCESS_TOKEN (compat com containers antigos)
  */
 const ACCESS_TOKEN =
   process.env.MP_ACCESS_TOKEN ||
   process.env.MERCADOPAGO_ACCESS_TOKEN ||
-  process.env.MERCADO_PAGO_ACCESS_TOKEN ||
-  process.env.MP_TOKEN;
+  process.env.MP_TOKEN ||
+  process.env.MERCADO_PAGO_ACCESS_TOKEN;
 
 if (!ACCESS_TOKEN) {
-  console.warn("[mercadopago] ATENÇÃO: token não definido (pagamentos vão falhar).");
+  console.warn("[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar.");
 } else {
   mercadopago.configure({ access_token: ACCESS_TOKEN });
 }
 
-function resolveNotificationUrl() {
-  // prioridade: explícito
-  const explicit =
+function getNotificationUrl() {
+  return (
     process.env.MP_WEBHOOK_URL ||
     process.env.MERCADO_PAGO_WEBHOOK_URL ||
-    process.env.MERCADOPAGO_WEBHOOK_URL;
-
-  if (explicit) return explicit;
-
-  // fallback: monta a partir do base público
-  const base = process.env.PUBLIC_BASE_URL;
-  if (base) return `${base.replace(/\/+$/, "")}/webhook/mercadopago`;
-
-  return null;
+    process.env.MERCADOPAGO_WEBHOOK_URL ||
+    ""
+  );
 }
 
-function resolveBackUrls() {
-  const frontend =
-    process.env.FRONTEND_URL ||
-    process.env.FRONTEND_BASE_URL ||
-    "https://almaliraramos.com.br";
-
-  return {
-    success: process.env.FRONTEND_SUCCESS_URL || `${frontend.replace(/\/+$/, "")}/sucesso`,
-    failure: process.env.FRONTEND_FAILURE_URL || `${frontend.replace(/\/+$/, "")}/erro`,
-    pending: process.env.FRONTEND_PENDING_URL || `${frontend.replace(/\/+$/, "")}/pendente`,
-  };
-}
-
-/**
- * Cria uma Preference e devolve init_point.
- * - produto: { title|nome|name, preco_cents|price|preco }
- * - orderId: id do pedido no seu banco
- * - customer: { name, email }
- */
 export async function criarPagamento({ produto, orderId, customer }) {
-  if (!ACCESS_TOKEN) throw new Error("Token Mercado Pago ausente (MP_ACCESS_TOKEN / MERCADO_PAGO_ACCESS_TOKEN)");
+  if (!ACCESS_TOKEN) throw new Error("Access token do Mercado Pago ausente no backend");
   if (!produto) throw new Error("Produto é obrigatório");
   if (!orderId) throw new Error("orderId é obrigatório");
   if (!customer?.email) throw new Error("customer.email é obrigatório");
 
-  const title = produto.title || produto.nome || produto.name || "Produto";
+  const title = produto.title || produto.titulo || produto.nome || produto.name || "Produto";
 
   let unitPrice = null;
   if (typeof produto.preco_cents === "number") unitPrice = produto.preco_cents / 100;
@@ -70,12 +47,12 @@ export async function criarPagamento({ produto, orderId, customer }) {
     throw new Error("Preço inválido para Mercado Pago (unit_price)");
   }
 
-  const notificationUrl = resolveNotificationUrl();
+  const notificationUrl = getNotificationUrl();
   if (!notificationUrl) {
-    console.warn("[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL ou PUBLIC_BASE_URL). Webhook pode falhar.");
+    console.warn("[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL).");
   }
 
-  const back_urls = resolveBackUrls();
+  const frontendBase = process.env.FRONTEND_URL || "https://almaliraramos.com.br";
 
   const preference = {
     items: [
@@ -83,21 +60,27 @@ export async function criarPagamento({ produto, orderId, customer }) {
         title,
         quantity: 1,
         currency_id: "BRL",
-        unit_price: unitPrice,
-      },
+        unit_price: unitPrice
+      }
     ],
     payer: {
-      name: customer.name || "Cliente",
-      email: customer.email,
+      name: customer.name || customer.nome || "Cliente",
+      email: customer.email
     },
 
-    // chave principal para amarrar pagamento -> pedido
+    // Elo pagamento <-> order no banco
     external_reference: `order:${orderId}`,
 
+    // Webhook do MP -> seu backend
     notification_url: notificationUrl || undefined,
 
-    back_urls,
-    auto_return: "approved",
+    back_urls: {
+      success: process.env.FRONTEND_SUCCESS_URL || `${frontendBase}/sucesso`,
+      failure: process.env.FRONTEND_FAILURE_URL || `${frontendBase}/erro`,
+      pending: process.env.FRONTEND_PENDING_URL || `${frontendBase}/pendente`
+    },
+
+    auto_return: "approved"
   };
 
   try {
@@ -106,11 +89,11 @@ export async function criarPagamento({ produto, orderId, customer }) {
     return {
       id: response.body?.id || null,
       init_point: response.body?.init_point || null,
-      sandbox_init_point: response.body?.sandbox_init_point || null,
+      sandbox_init_point: response.body?.sandbox_init_point || null
     };
   } catch (error) {
     console.log("========== ERRO MERCADO PAGO ==========");
-    console.log(error?.message || error);
+    console.log("message:", error?.message);
     console.log("status:", error?.response?.status);
     console.log("data:", error?.response?.data);
     console.log("======================================");

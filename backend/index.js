@@ -2,23 +2,24 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import axios from "axios";
 import { Pool } from "pg";
-import { getProduct, resolveProductId, isActiveProduct, priceFromCents } from "./products.js";
-import { criarPagamento, mpStatus } from "./mercadopago.js";
+import { PRODUCTS } from "./products.js";
+import { criarPagamento } from "./mercadopago.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
 /**
- * ======================================================
+ * =========================
  * CORS
- * ======================================================
+ * =========================
  */
 const allowedOrigins = [
   "https://www.almaliraramos.com.br",
   "https://almaliraramos.com.br",
   "http://localhost:5173",
-  "http://localhost:3000",
+  "http://localhost:3000"
 ];
 
 app.use(
@@ -30,7 +31,7 @@ app.use(
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
+    credentials: true
   })
 );
 
@@ -38,10 +39,9 @@ app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
 
 /**
- * ======================================================
- * DB (Postgres)
- * Preferência: DATABASE_URL
- * ======================================================
+ * =========================
+ * DB
+ * =========================
  */
 const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL })
@@ -50,13 +50,13 @@ const pool = process.env.DATABASE_URL
       port: Number(process.env.DB_PORT || 5432),
       database: process.env.DB_NAME || "alma_ramos",
       user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD || "",
+      password: process.env.DB_PASSWORD || ""
     });
 
 /**
- * ======================================================
- * MIGRATION LIGHT (idempotente)
- * ======================================================
+ * =========================
+ * MIGRATION LIGHT (robusta)
+ * =========================
  */
 async function ensureSchema() {
   await pool.query(`
@@ -79,17 +79,74 @@ async function ensureSchema() {
       mp_payment_id TEXT,
       mp_payment_status TEXT,
 
+      n8n_sent_at TIMESTAMPTZ,
+      n8n_status TEXT,
+      n8n_last_error TEXT,
+
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
+  // garante colunas (caso a tabela exista antiga)
   await pool.query(`
     DO $$
     BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders'
-      ) THEN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_id') THEN
+        ALTER TABLE public.orders ADD COLUMN product_id TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_title') THEN
+        ALTER TABLE public.orders ADD COLUMN product_title TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_type') THEN
+        ALTER TABLE public.orders ADD COLUMN product_type TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='amount_cents') THEN
+        ALTER TABLE public.orders ADD COLUMN amount_cents INTEGER;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='currency') THEN
+        ALTER TABLE public.orders ADD COLUMN currency TEXT DEFAULT 'BRL';
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='email') THEN
+        ALTER TABLE public.orders ADD COLUMN email TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='client_json') THEN
+        ALTER TABLE public.orders ADD COLUMN client_json JSONB;
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='external_reference') THEN
+        ALTER TABLE public.orders ADD COLUMN external_reference TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_preference_id') THEN
+        ALTER TABLE public.orders ADD COLUMN mp_preference_id TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_init_point') THEN
+        ALTER TABLE public.orders ADD COLUMN mp_init_point TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_id') THEN
+        ALTER TABLE public.orders ADD COLUMN mp_payment_id TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_status') THEN
+        ALTER TABLE public.orders ADD COLUMN mp_payment_status TEXT;
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_sent_at') THEN
+        ALTER TABLE public.orders ADD COLUMN n8n_sent_at TIMESTAMPTZ;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_status') THEN
+        ALTER TABLE public.orders ADD COLUMN n8n_status TEXT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_last_error') THEN
+        ALTER TABLE public.orders ADD COLUMN n8n_last_error TEXT;
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders') THEN
         CREATE OR REPLACE FUNCTION set_updated_at_orders()
         RETURNS trigger AS $fn$
         BEGIN
@@ -99,9 +156,7 @@ async function ensureSchema() {
         $fn$ LANGUAGE plpgsql;
       END IF;
 
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders'
-      ) THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders') THEN
         CREATE TRIGGER trg_set_updated_at_orders
         BEFORE UPDATE ON public.orders
         FOR EACH ROW
@@ -110,19 +165,18 @@ async function ensureSchema() {
     END $$;
   `);
 
-  await pool.query(
-    `CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`
-  );
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_email ON public.orders(email);`);
 }
 
 /**
- * ======================================================
+ * =========================
  * HELPERS
- * ======================================================
+ * =========================
  */
 function normalizeFrontPayload(body) {
-  const produtoId = body?.produtoId || body?.productId || body?.produto_id;
+  // aceita produtoId ou produtoID que você testou no curl
+  const produtoId = body?.produtoId || body?.produtoID || body?.productId || body?.produto_id;
   if (!produtoId) return null;
 
   const client = {
@@ -130,10 +184,25 @@ function normalizeFrontPayload(body) {
     email: body?.email ? String(body.email) : "",
     dataNascimento: body?.dataNascimento ? String(body.dataNascimento) : "",
     horaNascimento: body?.horaNascimento ? String(body.horaNascimento) : "",
-    cidadeNascimento: body?.cidadeNascimento ? String(body.cidadeNascimento) : "",
+    cidadeNascimento: body?.cidadeNascimento ? String(body.cidadeNascimento) : ""
   };
 
   return { produtoId: String(produtoId), client };
+}
+
+function resolveProductId(produtoId) {
+  if (PRODUCTS[produtoId]) return produtoId;
+
+  const aliasMap = {
+    seu_ano_em_3_palavras: "seu_ano_3_palavras",
+    numerologia_mapa_do_ano: "numerologia_mapa_ano",
+    diagnostico_do_amor: "diagnostico_amor",
+    analise_secreta_do_signo: "analise_secreta_signo",
+    missao_de_vida_2026: "missao_vida_2026"
+  };
+
+  if (aliasMap[produtoId] && PRODUCTS[aliasMap[produtoId]]) return aliasMap[produtoId];
+  return produtoId;
 }
 
 function parseOrderIdFromExternalRef(externalRef) {
@@ -149,11 +218,6 @@ function parseOrderIdFromExternalRef(externalRef) {
     return Number.isFinite(n) ? n : null;
   }
 
-  try {
-    const obj = JSON.parse(externalRef);
-    if (obj?.orderId && Number.isFinite(Number(obj.orderId))) return Number(obj.orderId);
-  } catch (_) {}
-
   return null;
 }
 
@@ -165,36 +229,45 @@ function mpPaymentToOrderStatus(mpStatus) {
   return "payment_pending";
 }
 
+function getMpToken() {
+  return (
+    process.env.MP_ACCESS_TOKEN ||
+    process.env.MERCADOPAGO_ACCESS_TOKEN ||
+    process.env.MP_TOKEN ||
+    process.env.MERCADO_PAGO_ACCESS_TOKEN ||
+    ""
+  );
+}
+
 /**
- * ======================================================
+ * =========================
  * ROUTES
- * ======================================================
+ * =========================
  */
-app.get("/health", async (_req, res) => {
+app.get("/health", async (req, res) => {
   try {
     const r = await pool.query("SELECT 1 as ok");
     res.json({
       status: "ok",
       service: "alma-backend",
       db: r?.rows?.[0]?.ok === 1 ? "ok" : "unknown",
-      mp: mpStatus(),
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     });
   } catch (e) {
     res.status(500).json({
       status: "error",
       service: "alma-backend",
       db: "error",
-      message: e?.message || "DB error",
+      message: e?.message || "DB error"
     });
   }
 });
 
 /**
- * ======================================================
+ * =========================
  * CHECKOUT (ÚNICO)
  * POST /orders | POST /checkout
- * ======================================================
+ * =========================
  */
 async function checkoutHandler(req, res) {
   const normalized = normalizeFrontPayload(req.body);
@@ -209,41 +282,28 @@ async function checkoutHandler(req, res) {
         email: "string",
         dataNascimento: "yyyy-mm-dd",
         horaNascimento: "HH:mm",
-        cidadeNascimento: "string",
-      },
+        cidadeNascimento: "string"
+      }
     });
   }
 
   const produtoIdResolved = resolveProductId(normalized.produtoId);
-  const produto = getProduct(produtoIdResolved);
+  const produto = PRODUCTS[produtoIdResolved];
 
   if (!produto) {
     return res.status(400).json({
       status: "error",
       message: "produtoId inválido",
       produtoId: normalized.produtoId,
-      sugestao: produtoIdResolved !== normalized.produtoId ? produtoIdResolved : undefined,
+      sugestao: produtoIdResolved !== normalized.produtoId ? produtoIdResolved : undefined
     });
   }
 
-  if (!isActiveProduct(produto)) {
+  if (produto.status !== "ativo") {
     return res.status(400).json({
       status: "error",
       message: "Produto inativo",
-      produtoId: produtoIdResolved,
-    });
-  }
-
-  // IMPORTANTE: mensal (assinatura) tem webhook diferente (preapproval)
-  // Para não prometer automação errada, bloqueio aqui por enquanto.
-  if (produto.tipo === "mensal") {
-    return res.status(400).json({
-      status: "error",
-      message:
-        "Produto mensal (assinatura) requer webhook de preapproval. Este backend está configurado para pagamentos (payment) via preference.",
-      sugestao:
-        "Se quiser, eu gero a implementação de assinatura (preapproval) + webhook específico.",
-      checkout_url: produto?.payment?.mensal || null,
+      produtoId: produtoIdResolved
     });
   }
 
@@ -257,29 +317,25 @@ async function checkoutHandler(req, res) {
   if (!client.cidadeNascimento) missing.push("cidadeNascimento");
 
   if (missing.length) {
-    return res.status(400).json({
-      status: "error",
-      message: "Dados obrigatórios ausentes",
-      missing,
-    });
+    return res.status(400).json({ status: "error", message: "Dados obrigatórios ausentes", missing });
   }
 
   if (typeof produto.preco_cents !== "number" || produto.preco_cents <= 0) {
     return res.status(500).json({
       status: "error",
       message: "Produto sem preco_cents configurado",
-      produtoId: produtoIdResolved,
+      produtoId: produtoIdResolved
     });
   }
 
   const amountCents = produto.preco_cents;
-  const price = priceFromCents(amountCents);
+  const price = amountCents / 100;
 
   const clientDb = {
     ...client,
     produtoId: produtoIdResolved,
     produtoTitulo: produto.titulo,
-    produtoTipo: produto.tipo,
+    produtoTipo: produto.tipo
   };
 
   const dbClient = await pool.connect();
@@ -287,7 +343,6 @@ async function checkoutHandler(req, res) {
   try {
     await dbClient.query("BEGIN");
 
-    // 1) cria order
     const insert = await dbClient.query(
       `
         INSERT INTO public.orders
@@ -301,31 +356,28 @@ async function checkoutHandler(req, res) {
 
     const orderId = insert.rows[0].id;
 
-    // 2) external_reference
     const external_reference = `order:${orderId}`;
     await dbClient.query(`UPDATE public.orders SET external_reference = $1 WHERE id = $2`, [
       external_reference,
-      orderId,
+      orderId
     ]);
 
     await dbClient.query("COMMIT");
 
-    // 3) cria preference no MP
     const pagamento = await criarPagamento({
-      produto: { titulo: produto.titulo, preco_cents: produto.preco_cents },
+      produto: { title: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
-      customer: { name: client.nome, email: client.email },
+      customer: { name: client.nome, email: client.email }
     });
 
     if (!pagamento?.init_point) {
       return res.status(500).json({
         status: "error",
         message: "Mercado Pago não retornou init_point",
-        debug: pagamento || null,
+        debug: pagamento || null
       });
     }
 
-    // 4) salva dados MP
     await pool.query(
       `
         UPDATE public.orders
@@ -337,17 +389,11 @@ async function checkoutHandler(req, res) {
       [pagamento?.id || null, pagamento.init_point, orderId]
     );
 
-    // 5) responde pro front
     return res.json({
       status: "success",
       orderId,
       init_point: pagamento.init_point,
-      produto: {
-        produtoId: produtoIdResolved,
-        titulo: produto.titulo,
-        tipo: produto.tipo,
-        price,
-      },
+      produto: { produtoId: produtoIdResolved, titulo: produto.titulo, tipo: produto.tipo, price }
     });
   } catch (e) {
     await dbClient.query("ROLLBACK").catch(() => {});
@@ -355,7 +401,7 @@ async function checkoutHandler(req, res) {
     return res.status(500).json({
       status: "error",
       message: "Erro interno no checkout",
-      detail: e?.message || "unknown",
+      detail: e?.message || "unknown"
     });
   } finally {
     dbClient.release();
@@ -366,59 +412,43 @@ app.post("/checkout", checkoutHandler);
 app.post("/orders", checkoutHandler);
 
 /**
- * ======================================================
- * WEBHOOK MERCADO PAGO (payment)
- * ======================================================
- *
- * Aceita formatos comuns:
- * - body: { type: "payment", data: { id } }
- * - query: ?topic=payment&id=123
- * - query: ?type=payment&data.id=123
+ * =========================
+ * WEBHOOK MERCADO PAGO -> DISPARA N8N SÓ QUANDO APPROVED
+ * =========================
  */
 app.post("/webhook/mercadopago", async (req, res) => {
   // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
-    const type = req.body?.type || req.query?.type || req.query?.topic;
+    // MP pode mandar "type" ou "topic"
+    const type = req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
+
     const dataId =
       req.body?.data?.id ||
+      req.body?.id ||
       req.query?.["data.id"] ||
       req.query?.id ||
-      req.body?.id ||
       null;
 
-    if (type !== "payment" || !dataId) {
-      console.warn("Webhook ignorado (não é payment ou sem id)", { type, dataId });
+    if ((type !== "payment" && type !== "payments") || !dataId) {
+      console.warn("Webhook ignorado (sem payment/type ou sem data.id)", { type, dataId });
       return;
     }
 
-    const token =
-      process.env.MP_ACCESS_TOKEN ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN ||
-      process.env.MP_TOKEN;
-
+    const token = getMpToken();
     if (!token) {
-      console.error("MP_ACCESS_TOKEN não configurado; não dá pra consultar pagamento.");
+      console.error("Token MP não configurado; não dá pra consultar payment.");
       return;
     }
 
-    // Consulta pagamento (fonte de verdade)
-    const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+    const mpRes = await axios.get(`https://api.mercadopago.com/v1/payments/${dataId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000
     });
 
-    const payment = await mpRes.json();
-    if (!mpRes.ok) {
-      console.error("Erro ao consultar payment no MP:", mpRes.status, payment);
-      return;
-    }
-
-    const mpStatusValue = payment?.status || null;
+    const payment = mpRes.data;
+    const mpStatus = payment?.status || null;
     const externalRef = payment?.external_reference || null;
 
     const orderId = parseOrderIdFromExternalRef(externalRef);
@@ -427,9 +457,9 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const newOrderStatus = mpPaymentToOrderStatus(mpStatusValue);
+    const newOrderStatus = mpPaymentToOrderStatus(mpStatus);
 
-    // Atualiza pedido
+    // atualiza order com status do MP
     await pool.query(
       `
         UPDATE public.orders
@@ -438,21 +468,19 @@ app.post("/webhook/mercadopago", async (req, res) => {
             status = $3
         WHERE id = $4
       `,
-      [String(dataId), mpStatusValue, newOrderStatus, orderId]
+      [String(dataId), mpStatus, newOrderStatus, orderId]
     );
 
-    // Só dispara n8n quando aprovado/autorizado
-    if (!["approved", "authorized"].includes(mpStatusValue)) {
-      console.log("Pagamento ainda não aprovado. Não dispara n8n.", { orderId, mpStatusValue });
+    // só dispara n8n quando aprovado
+    if (!["approved", "authorized"].includes(mpStatus)) {
+      console.log("Pagamento não aprovado ainda. Não dispara n8n.", { orderId, mpStatus });
       return;
     }
 
-    // Busca pedido com dados do cliente
+    // busca order e checa se já enviou pro n8n
     const orderRes = await pool.query(
       `
-        SELECT id, product_id, product_title, product_type, amount_cents, currency,
-               email, client_json, status, mp_payment_id, mp_payment_status,
-               external_reference, created_at, updated_at
+        SELECT *
         FROM public.orders
         WHERE id = $1
         LIMIT 1;
@@ -466,40 +494,63 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
+    if (order.n8n_sent_at) {
+      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", { orderId, mpStatus });
+      return;
+    }
+
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nUrl) {
-      console.warn("N8N_WEBHOOK_URL não configurado. Pedido pago atualizado sem disparo n8n.");
+      console.warn("N8N_WEBHOOK_URL não configurado. Pedido pago sem disparo n8n.");
       return;
     }
 
     const payloadN8n = {
       source: "mercadopago_webhook",
       order,
-      payment,
+      payment
     };
 
-    const n8nRes = await fetch(n8nUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payloadN8n),
-    });
+    try {
+      const n8nRes = await axios.post(n8nUrl, payloadN8n, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 20000
+      });
 
-    if (!n8nRes.ok) {
-      const txt = await n8nRes.text().catch(() => "");
-      console.error("Falha ao enviar para n8n:", n8nRes.status, txt);
-      return;
+      await pool.query(
+        `
+          UPDATE public.orders
+          SET n8n_sent_at = now(),
+              n8n_status = 'sent',
+              n8n_last_error = NULL
+          WHERE id = $1
+        `,
+        [orderId]
+      );
+
+      console.log("✅ n8n disparado com sucesso", { orderId, mpStatus, n8nStatus: n8nRes.status });
+    } catch (err) {
+      const msg = err?.response?.data ? JSON.stringify(err.response.data) : (err?.message || "n8n error");
+      await pool.query(
+        `
+          UPDATE public.orders
+          SET n8n_status = 'error',
+              n8n_last_error = $2
+          WHERE id = $1
+        `,
+        [orderId, msg]
+      );
+      console.error("Falha ao enviar para n8n:", msg);
     }
-
-    console.log("✅ n8n disparado com sucesso", { orderId, mpStatusValue });
   } catch (e) {
-    console.error("Webhook handler error:", e?.message || e);
+    console.error("Webhook handler error:", e?.response?.data || e?.message || e);
   }
 });
 
 /**
- * ======================================================
+ * =========================
  * START
- * ======================================================
+ * =========================
  */
 (async () => {
   try {
