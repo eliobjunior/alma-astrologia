@@ -6,14 +6,14 @@ import { MercadoPagoConfig, Preference } from "mercadopago";
  * Aceita QUALQUER uma dessas variáveis:
  * - MP_ACCESS_TOKEN (recomendado)
  * - MERCADOPAGO_ACCESS_TOKEN
- * - MERCADO_PAGO_ACCESS_TOKEN (compat com setups antigos)
- * - MP_TOKEN (fallback)
+ * - MP_TOKEN
+ * - MERCADO_PAGO_ACCESS_TOKEN (compat)
  */
 const ACCESS_TOKEN =
   process.env.MP_ACCESS_TOKEN ||
   process.env.MERCADOPAGO_ACCESS_TOKEN ||
-  process.env.MERCADO_PAGO_ACCESS_TOKEN ||
-  process.env.MP_TOKEN;
+  process.env.MP_TOKEN ||
+  process.env.MERCADO_PAGO_ACCESS_TOKEN;
 
 if (!ACCESS_TOKEN) {
   console.warn(
@@ -21,17 +21,9 @@ if (!ACCESS_TOKEN) {
   );
 }
 
-/**
- * Cliente Mercado Pago (SDK novo)
- */
-const mpClient = new MercadoPagoConfig({
-  accessToken: ACCESS_TOKEN || "NO_TOKEN",
-});
-
-/**
- * Client de Preference (cria o link de pagamento)
- */
-const preferenceClient = new Preference(mpClient);
+const mpClient = ACCESS_TOKEN
+  ? new MercadoPagoConfig({ accessToken: ACCESS_TOKEN })
+  : null;
 
 function getNotificationUrl() {
   return (
@@ -42,18 +34,13 @@ function getNotificationUrl() {
   );
 }
 
-/**
- * Mantém a mesma assinatura do seu código atual.
- * Retorna init_point para redirecionar o cliente.
- */
 export async function criarPagamento({ produto, orderId, customer }) {
-  if (!ACCESS_TOKEN) throw new Error("Access token do Mercado Pago ausente no backend");
+  if (!mpClient) throw new Error("Access token do Mercado Pago ausente no backend");
   if (!produto) throw new Error("Produto é obrigatório");
   if (!orderId) throw new Error("orderId é obrigatório");
   if (!customer?.email) throw new Error("customer.email é obrigatório");
 
-  const title =
-    produto.title || produto.titulo || produto.nome || produto.name || "Produto";
+  const title = produto.title || produto.titulo || produto.nome || produto.name || "Produto";
 
   let unitPrice = null;
   if (typeof produto.preco_cents === "number") unitPrice = produto.preco_cents / 100;
@@ -73,8 +60,7 @@ export async function criarPagamento({ produto, orderId, customer }) {
 
   const frontendBase = process.env.FRONTEND_URL || "https://almaliraramos.com.br";
 
-  // Preferência (SDK novo)
-  const body = {
+  const preferenceBody = {
     items: [
       {
         title,
@@ -87,39 +73,33 @@ export async function criarPagamento({ produto, orderId, customer }) {
       name: customer.name || customer.nome || "Cliente",
       email: customer.email,
     },
-
-    // Elo pagamento <-> order no banco
     external_reference: `order:${orderId}`,
-
-    // Webhook do MP -> seu backend
     notification_url: notificationUrl || undefined,
-
     back_urls: {
       success: process.env.FRONTEND_SUCCESS_URL || `${frontendBase}/sucesso`,
       failure: process.env.FRONTEND_FAILURE_URL || `${frontendBase}/erro`,
       pending: process.env.FRONTEND_PENDING_URL || `${frontendBase}/pendente`,
     },
-
     auto_return: "approved",
   };
 
   try {
-    // SDK novo: preferenceClient.create({ body })
-    const res = await preferenceClient.create({ body });
+    const preference = new Preference(mpClient);
+    const response = await preference.create({ body: preferenceBody });
 
-    // Algumas versões retornam { body: {...} }, outras já retornam o objeto direto
-    const pref = res?.body ?? res;
+    // SDK novo costuma retornar direto; alguns retornam em response.body
+    const data = response?.body ?? response;
 
     return {
-      id: pref?.id || null,
-      init_point: pref?.init_point || null,
-      sandbox_init_point: pref?.sandbox_init_point || null,
+      id: data?.id || null,
+      init_point: data?.init_point || null,
+      sandbox_init_point: data?.sandbox_init_point || null,
     };
   } catch (error) {
     console.log("========== ERRO MERCADO PAGO ==========");
     console.log("message:", error?.message);
-    console.log("status:", error?.status || error?.response?.status);
-    console.log("data:", error?.response?.data || error);
+    console.log("status:", error?.response?.status);
+    console.log("data:", error?.response?.data);
     console.log("======================================");
     throw error;
   }
