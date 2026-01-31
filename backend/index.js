@@ -14,7 +14,7 @@ import {
 import { criarPagamento, getMpToken } from "./mercadopago.js";
 
 const app = express();
-const PORT = Number(process.env.PORT || 3333);
+const PORT = Number(process.env.PORT || 3000);
 
 /**
  * =========================
@@ -52,6 +52,7 @@ app.use(express.json({ limit: "1mb" }));
 function normalizeFrontPayload(body) {
   const produtoId =
     body?.produtoId || body?.produtoID || body?.productId || body?.produto_id;
+
   if (!produtoId) return null;
 
   const client = {
@@ -91,13 +92,13 @@ function mpPaymentToOrderStatus(mpStatus) {
 }
 
 /**
- * Garante numeric(10,2) coerente no Postgres.
- * Ex.: 500 cents -> 5.00
+ * Converte cents (int) -> numeric(10,2)
+ * Ex.: 500 -> 5.00
  */
 function numericPriceFromCents(amountCents) {
   const n = Number(amountCents);
   if (!Number.isFinite(n)) return null;
-  return Number((n / 100).toFixed(2));
+  return Math.round(n) / 100;
 }
 
 /**
@@ -179,9 +180,11 @@ async function checkoutHandler(req, res) {
   if (!client.cidadeNascimento) missing.push("cidadeNascimento");
 
   if (missing.length) {
-    return res
-      .status(400)
-      .json({ status: "error", message: "Dados obrigatórios ausentes", missing });
+    return res.status(400).json({
+      status: "error",
+      message: "Dados obrigatórios ausentes",
+      missing,
+    });
   }
 
   if (typeof produto.preco_cents !== "number" || produto.preco_cents <= 0) {
@@ -194,10 +197,10 @@ async function checkoutHandler(req, res) {
 
   const amountCents = produto.preco_cents;
 
-  // para front (formatado)
+  // pro front (string formatado)
   const price = priceFromCents(amountCents);
 
-  // para DB (numeric)
+  // pro banco (numeric)
   const priceNumeric = numericPriceFromCents(amountCents);
   if (priceNumeric === null) {
     return res.status(500).json({
@@ -220,11 +223,11 @@ async function checkoutHandler(req, res) {
     await dbClient.query("BEGIN");
 
     /**
-     * ✅ FIX: sua tabela orders tem NOT NULL em:
-     * - title
-     * - price
-     * - email
-     * então gravamos esses campos também.
+     * ✅ FIX: sua tabela orders exige title, price e email (NOT NULL).
+     * Então este INSERT sempre preenche esses campos.
+     *
+     * Também preenche os campos legados (nome/data_nascimento/...) porque
+     * sua tabela atual já tem essas colunas.
      */
     const insert = await dbClient.query(
       `
@@ -234,34 +237,48 @@ async function checkoutHandler(req, res) {
             price,
             email,
             status,
+
             product_id,
             product_title,
             product_type,
             amount_cents,
             currency,
-            client_json
+
+            client_json,
+
+            nome,
+            data_nascimento,
+            hora_nascimento,
+            cidade_nascimento
           )
         VALUES
           (
             $1, $2, $3, 'created',
-            $4, $5, $6, $7, 'BRL', $8
+            $4, $5, $6, $7, 'BRL',
+            $8,
+            $9, $10, $11, $12
           )
         RETURNING id;
       `,
       [
-        produto.titulo,     // title NOT NULL
-        priceNumeric,       // price NOT NULL (numeric)
-        client.email,       // email NOT NULL
+        produto.titulo,          // title NOT NULL
+        priceNumeric,            // price NOT NULL (numeric)
+        client.email,            // email NOT NULL
         produtoIdResolved,
         produto.titulo,
         produto.tipo,
         amountCents,
-        clientDb,           // jsonb
+        clientDb,                // jsonb
+        client.nome,             // legado
+        client.dataNascimento,   // legado
+        client.horaNascimento,   // legado
+        client.cidadeNascimento, // legado
       ]
     );
 
     const orderId = insert.rows[0].id;
 
+    // external_reference vai pro MP
     const external_reference = `order:${orderId}`;
     await dbClient.query(
       `UPDATE public.orders SET external_reference = $1 WHERE id = $2`,
@@ -270,7 +287,7 @@ async function checkoutHandler(req, res) {
 
     await dbClient.query("COMMIT");
 
-    // cria pagamento no MP
+    // cria pagamento MP
     const pagamento = await criarPagamento({
       produto: { title: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
@@ -285,7 +302,7 @@ async function checkoutHandler(req, res) {
       });
     }
 
-    // atualiza pedido com preference/init_point
+    // atualiza order
     await pool.query(
       `
         UPDATE public.orders
@@ -305,7 +322,7 @@ async function checkoutHandler(req, res) {
         produtoId: produtoIdResolved,
         titulo: produto.titulo,
         tipo: produto.tipo,
-        price,
+        price, // string pro front
       },
     });
   } catch (e) {
@@ -327,15 +344,15 @@ app.post("/orders", checkoutHandler);
 /**
  * =========================
  * WEBHOOK MERCADO PAGO -> DISPARA N8N SÓ QUANDO APPROVED
- * ROTA: POST /webhook/mercadopago
+ * POST /webhook/mercadopago
  * =========================
  */
 app.post("/webhook/mercadopago", async (req, res) => {
+  // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
-    const type =
-      req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
+    const type = req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
 
     const dataId =
       req.body?.data?.id ||
@@ -355,13 +372,10 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const mpRes = await axios.get(
-      `https://api.mercadopago.com/v1/payments/${dataId}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 15000,
-      }
-    );
+    const mpRes = await axios.get(`https://api.mercadopago.com/v1/payments/${dataId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000,
+    });
 
     const payment = mpRes.data;
     const mpStatus = payment?.status || null;
@@ -408,10 +422,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
     }
 
     if (order.n8n_sent_at) {
-      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", {
-        orderId,
-        mpStatus,
-      });
+      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", { orderId, mpStatus });
       return;
     }
 
@@ -444,11 +455,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
         [orderId]
       );
 
-      console.log("✅ n8n disparado com sucesso", {
-        orderId,
-        mpStatus,
-        n8nStatus: n8nRes.status,
-      });
+      console.log("✅ n8n disparado com sucesso", { orderId, mpStatus, n8nStatus: n8nRes.status });
     } catch (err) {
       const msg = err?.response?.data
         ? JSON.stringify(err.response.data)
