@@ -114,6 +114,7 @@ export const PRODUCTS = {
     },
   },
 
+  // ✅ ID OFICIAL
   seu_ano_em_3_palavras: {
     titulo: "Seu Ano em 3 Palavras",
     tipo: "avulso",
@@ -148,7 +149,7 @@ export const PRODUCTS = {
   },
 
   // ─────────────────────────────
-  // PLANOS / ASSINATURAS (preapproval)
+  // PLANOS / ASSINATURAS
   // ─────────────────────────────
   plano_total_mensal: {
     titulo: "Plano Total Mensal",
@@ -185,9 +186,14 @@ export const PRODUCTS = {
   },
 };
 
-// Aliases consolidados num lugar só
+// ✅ Aliases consolidados (compatibilidade com ids antigos do front)
 const ALIAS_MAP = {
+  // oficial
   seu_ano_em_3_palavras: "seu_ano_em_3_palavras",
+
+  // ✅ compat: seu_ano_3_palavras (sem "em") -> oficial
+  seu_ano_3_palavras: "seu_ano_em_3_palavras",
+
   numerologia_mapa_do_ano: "numerologia_mapa_ano",
   diagnostico_do_amor: "diagnostico_amor",
   analise_secreta_do_signo: "analise_secreta_signo",
@@ -196,11 +202,21 @@ const ALIAS_MAP = {
 
 export function resolveProductId(produtoId) {
   if (!produtoId) return null;
-  const id = String(produtoId);
+
+  const raw = String(produtoId).trim();
+
+  // normaliza alguns formatos comuns
+  const id = raw
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "_")
+    .toLowerCase();
+
   if (PRODUCTS[id]) return id;
+
   const aliased = ALIAS_MAP[id];
   if (aliased && PRODUCTS[aliased]) return aliased;
-  return id;
+
+  return id; // devolve normalizado (ajuda debug)
 }
 
 export function getProduct(produtoId) {
@@ -213,7 +229,8 @@ export function isActiveProduct(produto) {
   return !!produto && produto.status === "ativo";
 }
 
+// string/formatado pro front (usado só para exibição)
 export function priceFromCents(preco_cents) {
   if (typeof preco_cents !== "number" || preco_cents <= 0) return null;
-  return preco_cents / 100;
+  return (preco_cents / 100).toFixed(2);
 }
