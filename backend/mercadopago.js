@@ -16,20 +16,26 @@ const ACCESS_TOKEN =
   process.env.MERCADO_PAGO_ACCESS_TOKEN;
 
 if (!ACCESS_TOKEN) {
-  console.warn(
-    "[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar."
-  );
+  console.warn("[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar.");
 }
 
-const mpClient = ACCESS_TOKEN
-  ? new MercadoPagoConfig({ accessToken: ACCESS_TOKEN })
-  : null;
+const mpClient = ACCESS_TOKEN ? new MercadoPagoConfig({ accessToken: ACCESS_TOKEN }) : null;
 
 function getNotificationUrl() {
   return (
     process.env.MP_WEBHOOK_URL ||
     process.env.MERCADO_PAGO_WEBHOOK_URL ||
     process.env.MERCADOPAGO_WEBHOOK_URL ||
+    ""
+  );
+}
+
+export function getMpToken() {
+  return (
+    process.env.MP_ACCESS_TOKEN ||
+    process.env.MERCADOPAGO_ACCESS_TOKEN ||
+    process.env.MP_TOKEN ||
+    process.env.MERCADO_PAGO_ACCESS_TOKEN ||
     ""
   );
 }
@@ -53,9 +59,7 @@ export async function criarPagamento({ produto, orderId, customer }) {
 
   const notificationUrl = getNotificationUrl();
   if (!notificationUrl) {
-    console.warn(
-      "[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL)."
-    );
+    console.warn("[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL).");
   }
 
   const frontendBase = process.env.FRONTEND_URL || "https://almaliraramos.com.br";
@@ -74,7 +78,10 @@ export async function criarPagamento({ produto, orderId, customer }) {
       email: customer.email,
     },
     external_reference: `order:${orderId}`,
+
+    // URL do BACKEND que recebe notificações do Mercado Pago
     notification_url: notificationUrl || undefined,
+
     back_urls: {
       success: process.env.FRONTEND_SUCCESS_URL || `${frontendBase}/sucesso`,
       failure: process.env.FRONTEND_FAILURE_URL || `${frontendBase}/erro`,
@@ -87,7 +94,6 @@ export async function criarPagamento({ produto, orderId, customer }) {
     const preference = new Preference(mpClient);
     const response = await preference.create({ body: preferenceBody });
 
-    // SDK novo costuma retornar direto; alguns retornam em response.body
     const data = response?.body ?? response;
 
     return {

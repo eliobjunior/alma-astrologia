@@ -3,9 +3,15 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import axios from "axios";
-import { Pool } from "pg";
-import { PRODUCTS } from "./products.js";
-import { criarPagamento } from "./mercadopago.js";
+
+import { ensureSchema, pool } from "./db.js";
+import {
+  getProduct,
+  resolveProductId,
+  isActiveProduct,
+  priceFromCents,
+} from "./products.js";
+import { criarPagamento, getMpToken } from "./mercadopago.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -19,7 +25,7 @@ const allowedOrigins = [
   "https://www.almaliraramos.com.br",
   "https://almaliraramos.com.br",
   "http://localhost:5173",
-  "http://localhost:3000"
+  "http://localhost:3000",
 ];
 
 app.use(
@@ -27,11 +33,11 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(null, true);
+      return cb(null, true); // (mantém permissivo como você já estava)
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
+    credentials: true,
   })
 );
 
@@ -40,143 +46,12 @@ app.use(express.json({ limit: "1mb" }));
 
 /**
  * =========================
- * DB
- * =========================
- */
-const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL })
-  : new Pool({
-      host: process.env.DB_HOST || "localhost",
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME || "alma_ramos",
-      user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD || ""
-    });
-
-/**
- * =========================
- * MIGRATION LIGHT (robusta)
- * =========================
- */
-async function ensureSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.orders (
-      id BIGSERIAL PRIMARY KEY,
-      product_id TEXT,
-      product_title TEXT,
-      product_type TEXT,
-      amount_cents INTEGER,
-      currency TEXT DEFAULT 'BRL',
-
-      email TEXT,
-      client_json JSONB,
-
-      status TEXT NOT NULL DEFAULT 'created',
-
-      external_reference TEXT,
-      mp_preference_id TEXT,
-      mp_init_point TEXT,
-      mp_payment_id TEXT,
-      mp_payment_status TEXT,
-
-      n8n_sent_at TIMESTAMPTZ,
-      n8n_status TEXT,
-      n8n_last_error TEXT,
-
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-  `);
-
-  // garante colunas (caso a tabela exista antiga)
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_id') THEN
-        ALTER TABLE public.orders ADD COLUMN product_id TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_title') THEN
-        ALTER TABLE public.orders ADD COLUMN product_title TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='product_type') THEN
-        ALTER TABLE public.orders ADD COLUMN product_type TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='amount_cents') THEN
-        ALTER TABLE public.orders ADD COLUMN amount_cents INTEGER;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='currency') THEN
-        ALTER TABLE public.orders ADD COLUMN currency TEXT DEFAULT 'BRL';
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='email') THEN
-        ALTER TABLE public.orders ADD COLUMN email TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='client_json') THEN
-        ALTER TABLE public.orders ADD COLUMN client_json JSONB;
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='external_reference') THEN
-        ALTER TABLE public.orders ADD COLUMN external_reference TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_preference_id') THEN
-        ALTER TABLE public.orders ADD COLUMN mp_preference_id TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_init_point') THEN
-        ALTER TABLE public.orders ADD COLUMN mp_init_point TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_id') THEN
-        ALTER TABLE public.orders ADD COLUMN mp_payment_id TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_status') THEN
-        ALTER TABLE public.orders ADD COLUMN mp_payment_status TEXT;
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_sent_at') THEN
-        ALTER TABLE public.orders ADD COLUMN n8n_sent_at TIMESTAMPTZ;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_status') THEN
-        ALTER TABLE public.orders ADD COLUMN n8n_status TEXT;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_last_error') THEN
-        ALTER TABLE public.orders ADD COLUMN n8n_last_error TEXT;
-      END IF;
-    END $$;
-  `);
-
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders') THEN
-        CREATE OR REPLACE FUNCTION set_updated_at_orders()
-        RETURNS trigger AS $fn$
-        BEGIN
-          NEW.updated_at = now();
-          RETURN NEW;
-        END;
-        $fn$ LANGUAGE plpgsql;
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders') THEN
-        CREATE TRIGGER trg_set_updated_at_orders
-        BEFORE UPDATE ON public.orders
-        FOR EACH ROW
-        EXECUTE FUNCTION set_updated_at_orders();
-      END IF;
-    END $$;
-  `);
-
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_email ON public.orders(email);`);
-}
-
-/**
- * =========================
  * HELPERS
  * =========================
  */
 function normalizeFrontPayload(body) {
-  // aceita produtoId ou produtoID que você testou no curl
-  const produtoId = body?.produtoId || body?.produtoID || body?.productId || body?.produto_id;
+  const produtoId =
+    body?.produtoId || body?.produtoID || body?.productId || body?.produto_id;
   if (!produtoId) return null;
 
   const client = {
@@ -184,25 +59,10 @@ function normalizeFrontPayload(body) {
     email: body?.email ? String(body.email) : "",
     dataNascimento: body?.dataNascimento ? String(body.dataNascimento) : "",
     horaNascimento: body?.horaNascimento ? String(body.horaNascimento) : "",
-    cidadeNascimento: body?.cidadeNascimento ? String(body.cidadeNascimento) : ""
+    cidadeNascimento: body?.cidadeNascimento ? String(body.cidadeNascimento) : "",
   };
 
   return { produtoId: String(produtoId), client };
-}
-
-function resolveProductId(produtoId) {
-  if (PRODUCTS[produtoId]) return produtoId;
-
-  const aliasMap = {
-    seu_ano_em_3_palavras: "seu_ano_3_palavras",
-    numerologia_mapa_do_ano: "numerologia_mapa_ano",
-    diagnostico_do_amor: "diagnostico_amor",
-    analise_secreta_do_signo: "analise_secreta_signo",
-    missao_de_vida_2026: "missao_vida_2026"
-  };
-
-  if (aliasMap[produtoId] && PRODUCTS[aliasMap[produtoId]]) return aliasMap[produtoId];
-  return produtoId;
 }
 
 function parseOrderIdFromExternalRef(externalRef) {
@@ -224,19 +84,20 @@ function parseOrderIdFromExternalRef(externalRef) {
 function mpPaymentToOrderStatus(mpStatus) {
   if (!mpStatus) return "payment_pending";
   if (["approved", "authorized"].includes(mpStatus)) return "paid";
-  if (["rejected", "cancelled", "refunded", "charged_back"].includes(mpStatus)) return "failed";
+  if (["rejected", "cancelled", "refunded", "charged_back"].includes(mpStatus))
+    return "failed";
   if (["in_process", "pending"].includes(mpStatus)) return "payment_pending";
   return "payment_pending";
 }
 
-function getMpToken() {
-  return (
-    process.env.MP_ACCESS_TOKEN ||
-    process.env.MERCADOPAGO_ACCESS_TOKEN ||
-    process.env.MP_TOKEN ||
-    process.env.MERCADO_PAGO_ACCESS_TOKEN ||
-    ""
-  );
+/**
+ * Garante número (numeric) para gravar no Postgres.
+ * Ex.: 500 cents -> 5.00
+ */
+function numericPriceFromCents(amountCents) {
+  const n = Number(amountCents);
+  if (!Number.isFinite(n)) return null;
+  return n / 100;
 }
 
 /**
@@ -251,14 +112,14 @@ app.get("/health", async (req, res) => {
       status: "ok",
       service: "alma-backend",
       db: r?.rows?.[0]?.ok === 1 ? "ok" : "unknown",
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } catch (e) {
     res.status(500).json({
       status: "error",
       service: "alma-backend",
       db: "error",
-      message: e?.message || "DB error"
+      message: e?.message || "DB error",
     });
   }
 });
@@ -282,28 +143,29 @@ async function checkoutHandler(req, res) {
         email: "string",
         dataNascimento: "yyyy-mm-dd",
         horaNascimento: "HH:mm",
-        cidadeNascimento: "string"
-      }
+        cidadeNascimento: "string",
+      },
     });
   }
 
   const produtoIdResolved = resolveProductId(normalized.produtoId);
-  const produto = PRODUCTS[produtoIdResolved];
+  const produto = getProduct(produtoIdResolved);
 
   if (!produto) {
     return res.status(400).json({
       status: "error",
       message: "produtoId inválido",
       produtoId: normalized.produtoId,
-      sugestao: produtoIdResolved !== normalized.produtoId ? produtoIdResolved : undefined
+      sugestao:
+        produtoIdResolved !== normalized.produtoId ? produtoIdResolved : undefined,
     });
   }
 
-  if (produto.status !== "ativo") {
+  if (!isActiveProduct(produto)) {
     return res.status(400).json({
       status: "error",
       message: "Produto inativo",
-      produtoId: produtoIdResolved
+      produtoId: produtoIdResolved,
     });
   }
 
@@ -317,25 +179,39 @@ async function checkoutHandler(req, res) {
   if (!client.cidadeNascimento) missing.push("cidadeNascimento");
 
   if (missing.length) {
-    return res.status(400).json({ status: "error", message: "Dados obrigatórios ausentes", missing });
+    return res
+      .status(400)
+      .json({ status: "error", message: "Dados obrigatórios ausentes", missing });
   }
 
   if (typeof produto.preco_cents !== "number" || produto.preco_cents <= 0) {
     return res.status(500).json({
       status: "error",
       message: "Produto sem preco_cents configurado",
-      produtoId: produtoIdResolved
+      produtoId: produtoIdResolved,
     });
   }
 
   const amountCents = produto.preco_cents;
-  const price = amountCents / 100;
+
+  // Usado para o front (string / formatado)
+  const price = priceFromCents(amountCents);
+
+  // Usado para gravar no Postgres (numeric)
+  const priceNumeric = numericPriceFromCents(amountCents);
+  if (priceNumeric === null) {
+    return res.status(500).json({
+      status: "error",
+      message: "Preço inválido para persistência",
+      amountCents,
+    });
+  }
 
   const clientDb = {
     ...client,
     produtoId: produtoIdResolved,
     produtoTitulo: produto.titulo,
-    produtoTipo: produto.tipo
+    produtoTipo: produto.tipo,
   };
 
   const dbClient = await pool.connect();
@@ -343,41 +219,78 @@ async function checkoutHandler(req, res) {
   try {
     await dbClient.query("BEGIN");
 
+    /**
+     * ✅ FIX PRINCIPAL
+     * Sua tabela orders exige:
+     * - title NOT NULL
+     * - price NOT NULL
+     * - email NOT NULL
+     *
+     * Então inserimos esses campos também.
+     *
+     * Observação: mantemos também os campos "product_*" e "amount_cents" que você já usa.
+     */
     const insert = await dbClient.query(
       `
         INSERT INTO public.orders
-          (product_id, product_title, product_type, amount_cents, currency, email, client_json, status)
+          (
+            title,
+            price,
+            email,
+            status,
+            product_id,
+            product_title,
+            product_type,
+            amount_cents,
+            currency,
+            client_json
+          )
         VALUES
-          ($1, $2, $3, $4, 'BRL', $5, $6, 'created')
+          (
+            $1, $2, $3, 'created',
+            $4, $5, $6, $7, 'BRL', $8
+          )
         RETURNING id;
       `,
-      [produtoIdResolved, produto.titulo, produto.tipo, amountCents, client.email, clientDb]
+      [
+        produto.titulo,          // title (NOT NULL)
+        priceNumeric,            // price (NOT NULL) -> numeric
+        client.email,            // email (NOT NULL)
+        produtoIdResolved,
+        produto.titulo,
+        produto.tipo,
+        amountCents,
+        clientDb,                // jsonb
+      ]
     );
 
     const orderId = insert.rows[0].id;
 
+    // 2) salva external_reference (será enviado ao MP)
     const external_reference = `order:${orderId}`;
-    await dbClient.query(`UPDATE public.orders SET external_reference = $1 WHERE id = $2`, [
-      external_reference,
-      orderId
-    ]);
+    await dbClient.query(
+      `UPDATE public.orders SET external_reference = $1 WHERE id = $2`,
+      [external_reference, orderId]
+    );
 
     await dbClient.query("COMMIT");
 
+    // 3) cria pagamento no MP (preference)
     const pagamento = await criarPagamento({
       produto: { title: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
-      customer: { name: client.nome, email: client.email }
+      customer: { name: client.nome, email: client.email },
     });
 
     if (!pagamento?.init_point) {
       return res.status(500).json({
         status: "error",
         message: "Mercado Pago não retornou init_point",
-        debug: pagamento || null
+        debug: pagamento || null,
       });
     }
 
+    // 4) atualiza pedido com preference e init_point
     await pool.query(
       `
         UPDATE public.orders
@@ -389,11 +302,17 @@ async function checkoutHandler(req, res) {
       [pagamento?.id || null, pagamento.init_point, orderId]
     );
 
+    // 5) devolve pro frontend redirecionar
     return res.json({
       status: "success",
       orderId,
       init_point: pagamento.init_point,
-      produto: { produtoId: produtoIdResolved, titulo: produto.titulo, tipo: produto.tipo, price }
+      produto: {
+        produtoId: produtoIdResolved,
+        titulo: produto.titulo,
+        tipo: produto.tipo,
+        price, // string/formatado pro front
+      },
     });
   } catch (e) {
     await dbClient.query("ROLLBACK").catch(() => {});
@@ -401,7 +320,7 @@ async function checkoutHandler(req, res) {
     return res.status(500).json({
       status: "error",
       message: "Erro interno no checkout",
-      detail: e?.message || "unknown"
+      detail: e?.message || "unknown",
     });
   } finally {
     dbClient.release();
@@ -414,6 +333,7 @@ app.post("/orders", checkoutHandler);
 /**
  * =========================
  * WEBHOOK MERCADO PAGO -> DISPARA N8N SÓ QUANDO APPROVED
+ * ROTA DO BACKEND: POST /webhook/mercadopago
  * =========================
  */
 app.post("/webhook/mercadopago", async (req, res) => {
@@ -421,7 +341,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    // MP pode mandar "type" ou "topic"
+    // MP pode mandar "type" ou "topic" (e às vezes vem em querystring)
     const type = req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
 
     const dataId =
@@ -442,9 +362,10 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
+    // consulta o pagamento no MP para confirmar status REAL
     const mpRes = await axios.get(`https://api.mercadopago.com/v1/payments/${dataId}`, {
       headers: { Authorization: `Bearer ${token}` },
-      timeout: 15000
+      timeout: 15000,
     });
 
     const payment = mpRes.data;
@@ -495,10 +416,14 @@ app.post("/webhook/mercadopago", async (req, res) => {
     }
 
     if (order.n8n_sent_at) {
-      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", { orderId, mpStatus });
+      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", {
+        orderId,
+        mpStatus,
+      });
       return;
     }
 
+    // ✅ ESTA URL PRECISA SER DO WEBHOOK NODE DO N8N
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nUrl) {
       console.warn("N8N_WEBHOOK_URL não configurado. Pedido pago sem disparo n8n.");
@@ -508,13 +433,13 @@ app.post("/webhook/mercadopago", async (req, res) => {
     const payloadN8n = {
       source: "mercadopago_webhook",
       order,
-      payment
+      payment,
     };
 
     try {
       const n8nRes = await axios.post(n8nUrl, payloadN8n, {
         headers: { "Content-Type": "application/json" },
-        timeout: 20000
+        timeout: 20000,
       });
 
       await pool.query(
@@ -528,9 +453,16 @@ app.post("/webhook/mercadopago", async (req, res) => {
         [orderId]
       );
 
-      console.log("✅ n8n disparado com sucesso", { orderId, mpStatus, n8nStatus: n8nRes.status });
+      console.log("✅ n8n disparado com sucesso", {
+        orderId,
+        mpStatus,
+        n8nStatus: n8nRes.status,
+      });
     } catch (err) {
-      const msg = err?.response?.data ? JSON.stringify(err.response.data) : (err?.message || "n8n error");
+      const msg = err?.response?.data
+        ? JSON.stringify(err.response.data)
+        : err?.message || "n8n error";
+
       await pool.query(
         `
           UPDATE public.orders
@@ -540,6 +472,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
         `,
         [orderId, msg]
       );
+
       console.error("Falha ao enviar para n8n:", msg);
     }
   } catch (e) {

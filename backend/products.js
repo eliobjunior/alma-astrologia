@@ -125,18 +125,6 @@ export const PRODUCTS = {
     },
   },
 
-  // alias que já apareceu nos seus testes
-  seu_ano_em_3_palavras: {
-    titulo: "Seu Ano em 3 Palavras",
-    tipo: "avulso",
-    status: "ativo",
-    preco_cents: 500,
-    payment: {
-      avulso: "https://mpago.la/2apjLgx",
-      precoAvulso: "R$ 5,00",
-    },
-  },
-
   missao_vida_2026: {
     titulo: "Missão de Vida 2026",
     tipo: "avulso",
@@ -160,8 +148,7 @@ export const PRODUCTS = {
   },
 
   // ─────────────────────────────
-  // PLANOS / ASSINATURAS
-  // (Webhook é diferente: preapproval). Não tratamos aqui como "payment".
+  // PLANOS / ASSINATURAS (preapproval)
   // ─────────────────────────────
   plano_total_mensal: {
     titulo: "Plano Total Mensal",
@@ -213,7 +200,7 @@ export function resolveProductId(produtoId) {
   if (PRODUCTS[id]) return id;
   const aliased = ALIAS_MAP[id];
   if (aliased && PRODUCTS[aliased]) return aliased;
-  return id; // devolve mesmo assim (para mensagem de erro ficar clara)
+  return id;
 }
 
 export function getProduct(produtoId) {
