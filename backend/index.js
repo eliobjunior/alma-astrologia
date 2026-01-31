@@ -14,7 +14,7 @@ import {
 import { criarPagamento, getMpToken } from "./mercadopago.js";
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3333);
 
 /**
  * =========================
@@ -33,7 +33,7 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(null, true); // (mantém permissivo como você já estava)
+      return cb(null, true); // mantém permissivo
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -91,13 +91,13 @@ function mpPaymentToOrderStatus(mpStatus) {
 }
 
 /**
- * Garante número (numeric) para gravar no Postgres.
+ * Garante numeric(10,2) coerente no Postgres.
  * Ex.: 500 cents -> 5.00
  */
 function numericPriceFromCents(amountCents) {
   const n = Number(amountCents);
   if (!Number.isFinite(n)) return null;
-  return n / 100;
+  return Number((n / 100).toFixed(2));
 }
 
 /**
@@ -194,10 +194,10 @@ async function checkoutHandler(req, res) {
 
   const amountCents = produto.preco_cents;
 
-  // Usado para o front (string / formatado)
+  // para front (formatado)
   const price = priceFromCents(amountCents);
 
-  // Usado para gravar no Postgres (numeric)
+  // para DB (numeric)
   const priceNumeric = numericPriceFromCents(amountCents);
   if (priceNumeric === null) {
     return res.status(500).json({
@@ -220,15 +220,11 @@ async function checkoutHandler(req, res) {
     await dbClient.query("BEGIN");
 
     /**
-     * ✅ FIX PRINCIPAL
-     * Sua tabela orders exige:
-     * - title NOT NULL
-     * - price NOT NULL
-     * - email NOT NULL
-     *
-     * Então inserimos esses campos também.
-     *
-     * Observação: mantemos também os campos "product_*" e "amount_cents" que você já usa.
+     * ✅ FIX: sua tabela orders tem NOT NULL em:
+     * - title
+     * - price
+     * - email
+     * então gravamos esses campos também.
      */
     const insert = await dbClient.query(
       `
@@ -253,20 +249,19 @@ async function checkoutHandler(req, res) {
         RETURNING id;
       `,
       [
-        produto.titulo,          // title (NOT NULL)
-        priceNumeric,            // price (NOT NULL) -> numeric
-        client.email,            // email (NOT NULL)
+        produto.titulo,     // title NOT NULL
+        priceNumeric,       // price NOT NULL (numeric)
+        client.email,       // email NOT NULL
         produtoIdResolved,
         produto.titulo,
         produto.tipo,
         amountCents,
-        clientDb,                // jsonb
+        clientDb,           // jsonb
       ]
     );
 
     const orderId = insert.rows[0].id;
 
-    // 2) salva external_reference (será enviado ao MP)
     const external_reference = `order:${orderId}`;
     await dbClient.query(
       `UPDATE public.orders SET external_reference = $1 WHERE id = $2`,
@@ -275,7 +270,7 @@ async function checkoutHandler(req, res) {
 
     await dbClient.query("COMMIT");
 
-    // 3) cria pagamento no MP (preference)
+    // cria pagamento no MP
     const pagamento = await criarPagamento({
       produto: { title: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
@@ -290,7 +285,7 @@ async function checkoutHandler(req, res) {
       });
     }
 
-    // 4) atualiza pedido com preference e init_point
+    // atualiza pedido com preference/init_point
     await pool.query(
       `
         UPDATE public.orders
@@ -302,7 +297,6 @@ async function checkoutHandler(req, res) {
       [pagamento?.id || null, pagamento.init_point, orderId]
     );
 
-    // 5) devolve pro frontend redirecionar
     return res.json({
       status: "success",
       orderId,
@@ -311,7 +305,7 @@ async function checkoutHandler(req, res) {
         produtoId: produtoIdResolved,
         titulo: produto.titulo,
         tipo: produto.tipo,
-        price, // string/formatado pro front
+        price,
       },
     });
   } catch (e) {
@@ -333,16 +327,15 @@ app.post("/orders", checkoutHandler);
 /**
  * =========================
  * WEBHOOK MERCADO PAGO -> DISPARA N8N SÓ QUANDO APPROVED
- * ROTA DO BACKEND: POST /webhook/mercadopago
+ * ROTA: POST /webhook/mercadopago
  * =========================
  */
 app.post("/webhook/mercadopago", async (req, res) => {
-  // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
-    // MP pode mandar "type" ou "topic" (e às vezes vem em querystring)
-    const type = req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
+    const type =
+      req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
 
     const dataId =
       req.body?.data?.id ||
@@ -362,11 +355,13 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    // consulta o pagamento no MP para confirmar status REAL
-    const mpRes = await axios.get(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 15000,
-    });
+    const mpRes = await axios.get(
+      `https://api.mercadopago.com/v1/payments/${dataId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000,
+      }
+    );
 
     const payment = mpRes.data;
     const mpStatus = payment?.status || null;
@@ -380,7 +375,6 @@ app.post("/webhook/mercadopago", async (req, res) => {
 
     const newOrderStatus = mpPaymentToOrderStatus(mpStatus);
 
-    // atualiza order com status do MP
     await pool.query(
       `
         UPDATE public.orders
@@ -392,13 +386,11 @@ app.post("/webhook/mercadopago", async (req, res) => {
       [String(dataId), mpStatus, newOrderStatus, orderId]
     );
 
-    // só dispara n8n quando aprovado
     if (!["approved", "authorized"].includes(mpStatus)) {
       console.log("Pagamento não aprovado ainda. Não dispara n8n.", { orderId, mpStatus });
       return;
     }
 
-    // busca order e checa se já enviou pro n8n
     const orderRes = await pool.query(
       `
         SELECT *
@@ -423,7 +415,6 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    // ✅ ESTA URL PRECISA SER DO WEBHOOK NODE DO N8N
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nUrl) {
       console.warn("N8N_WEBHOOK_URL não configurado. Pedido pago sem disparo n8n.");
