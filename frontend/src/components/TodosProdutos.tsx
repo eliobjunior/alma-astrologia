@@ -90,7 +90,7 @@ export function TodosProdutos() {
     },
     {
       titulo: "Seu Ano em 3 Palavras",
-      produtoId: "seu_ano_3_palavras",
+      produtoId: "seu_ano_em_3_palavras",
       descricao: "Os três pilares que vão guiar seu próximo ano.",
       imagem: IMAGES.seuAno3Palavras,
     },

@@ -114,7 +114,7 @@ export const PRODUCTS = {
     },
   },
 
-  seu_ano_3_palavras: {
+  seu_ano_em_3_palavras: {
     titulo: "Seu Ano em 3 Palavras",
     tipo: "avulso",
     status: "ativo",
@@ -187,7 +187,7 @@ export const PRODUCTS = {
 
 // Aliases consolidados num lugar só
 const ALIAS_MAP = {
-  seu_ano_em_3_palavras: "seu_ano_3_palavras",
+  seu_ano_em_3_palavras: "seu_ano_em_3_palavras",
   numerologia_mapa_do_ano: "numerologia_mapa_ano",
   diagnostico_do_amor: "diagnostico_amor",
   analise_secreta_do_signo: "analise_secreta_signo",
