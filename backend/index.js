@@ -14,9 +14,10 @@ import {
 import { criarPagamento, getMpToken } from "./mercadopago.js";
 
 const app = express();
+const PORT = Number(process.env.PORT || 3000);
 
-// ✅ PORT robusto (evita NaN)
-const PORT = parseInt(process.env.PORT ?? "3000", 10) || 3000;
+// ✅ Importante quando roda atrás do Traefik / proxy reverso
+app.set("trust proxy", 1);
 
 /**
  * =========================
@@ -35,8 +36,7 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      // mantém permissivo como você estava
-      return cb(null, true);
+      return cb(null, true); // mantém permissivo
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -199,12 +199,9 @@ async function checkoutHandler(req, res) {
   }
 
   const amountCents = produto.preco_cents;
-
-  // pro front
   const price = priceFromCents(amountCents);
-
-  // pro banco
   const priceNumeric = numericPriceFromCents(amountCents);
+
   if (priceNumeric === null) {
     return res.status(500).json({
       status: "error",
@@ -225,12 +222,6 @@ async function checkoutHandler(req, res) {
   try {
     await dbClient.query("BEGIN");
 
-    /**
-     * ✅ Insert seguro: só colunas “core” que normalmente existem
-     * e resolvem o erro de NOT NULL (title/price/email).
-     *
-     * Se você tiver colunas extras, podemos adicionar depois.
-     */
     const insert = await dbClient.query(
       `
         INSERT INTO public.orders
@@ -239,35 +230,47 @@ async function checkoutHandler(req, res) {
             price,
             email,
             status,
+
             product_id,
             product_title,
             product_type,
             amount_cents,
             currency,
-            client_json
+
+            client_json,
+
+            nome,
+            data_nascimento,
+            hora_nascimento,
+            cidade_nascimento
           )
         VALUES
           (
             $1, $2, $3, 'created',
-            $4, $5, $6, $7, 'BRL', $8
+            $4, $5, $6, $7, 'BRL',
+            $8,
+            $9, $10, $11, $12
           )
         RETURNING id;
       `,
       [
-        produto.titulo,     // title NOT NULL
-        priceNumeric,       // price NOT NULL (numeric)
-        client.email,       // email NOT NULL
+        produto.titulo,
+        priceNumeric,
+        client.email,
         produtoIdResolved,
         produto.titulo,
         produto.tipo,
         amountCents,
-        clientDb,           // json/jsonb
+        clientDb,
+        client.nome,
+        client.dataNascimento,
+        client.horaNascimento,
+        client.cidadeNascimento,
       ]
     );
 
     const orderId = insert.rows[0].id;
 
-    // external_reference vai pro MP
     const external_reference = `order:${orderId}`;
     await dbClient.query(
       `UPDATE public.orders SET external_reference = $1 WHERE id = $2`,
@@ -276,7 +279,6 @@ async function checkoutHandler(req, res) {
 
     await dbClient.query("COMMIT");
 
-    // cria pagamento MP
     const pagamento = await criarPagamento({
       produto: { title: produto.titulo, preco_cents: produto.preco_cents },
       orderId,
@@ -291,7 +293,6 @@ async function checkoutHandler(req, res) {
       });
     }
 
-    // atualiza order
     await pool.query(
       `
         UPDATE public.orders
@@ -341,7 +342,8 @@ app.post("/webhook/mercadopago", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    const type = req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
+    const type =
+      req.body?.type || req.body?.topic || req.query?.type || req.query?.topic;
 
     const dataId =
       req.body?.data?.id ||
@@ -351,7 +353,10 @@ app.post("/webhook/mercadopago", async (req, res) => {
       null;
 
     if ((type !== "payment" && type !== "payments") || !dataId) {
-      console.warn("Webhook ignorado (sem payment/type ou sem data.id)", { type, dataId });
+      console.warn("Webhook ignorado (sem payment/type ou sem data.id)", {
+        type,
+        dataId,
+      });
       return;
     }
 
@@ -361,10 +366,13 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const mpRes = await axios.get(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 15000,
-    });
+    const mpRes = await axios.get(
+      `https://api.mercadopago.com/v1/payments/${dataId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000,
+      }
+    );
 
     const payment = mpRes.data;
     const mpStatus = payment?.status || null;
@@ -390,7 +398,10 @@ app.post("/webhook/mercadopago", async (req, res) => {
     );
 
     if (!["approved", "authorized"].includes(mpStatus)) {
-      console.log("Pagamento não aprovado ainda. Não dispara n8n.", { orderId, mpStatus });
+      console.log("Pagamento não aprovado ainda. Não dispara n8n.", {
+        orderId,
+        mpStatus,
+      });
       return;
     }
 
@@ -411,7 +422,10 @@ app.post("/webhook/mercadopago", async (req, res) => {
     }
 
     if (order.n8n_sent_at) {
-      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", { orderId, mpStatus });
+      console.log("n8n já disparado anteriormente. Ignorando webhook repetido.", {
+        orderId,
+        mpStatus,
+      });
       return;
     }
 
@@ -421,7 +435,11 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const payloadN8n = { source: "mercadopago_webhook", order, payment };
+    const payloadN8n = {
+      source: "mercadopago_webhook",
+      order,
+      payment,
+    };
 
     try {
       const n8nRes = await axios.post(n8nUrl, payloadN8n, {
@@ -440,7 +458,11 @@ app.post("/webhook/mercadopago", async (req, res) => {
         [orderId]
       );
 
-      console.log("✅ n8n disparado com sucesso", { orderId, mpStatus, n8nStatus: n8nRes.status });
+      console.log("✅ n8n disparado com sucesso", {
+        orderId,
+        mpStatus,
+        n8nStatus: n8nRes.status,
+      });
     } catch (err) {
       const msg = err?.response?.data
         ? JSON.stringify(err.response.data)
@@ -465,7 +487,16 @@ app.post("/webhook/mercadopago", async (req, res) => {
 
 /**
  * =========================
- * START
+ * 404 + ERROR HANDLER
+ * =========================
+ */
+app.use((req, res) => {
+  res.status(404).send("404 page not found");
+});
+
+/**
+ * =========================
+ * START (✅ apenas 1 listen)
  * =========================
  */
 (async () => {
@@ -473,7 +504,6 @@ app.post("/webhook/mercadopago", async (req, res) => {
     await ensureSchema();
     console.log("✅ DB schema ok");
 
-    // ✅ ÚNICO listen (aqui)
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Backend rodando na porta ${PORT}`);
       console.log(`   Rotas: POST /checkout | POST /orders`);
