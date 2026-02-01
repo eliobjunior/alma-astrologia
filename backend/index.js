@@ -14,7 +14,9 @@ import {
 import { criarPagamento, getMpToken } from "./mercadopago.js";
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+
+// ✅ PORT robusto (evita NaN)
+const PORT = parseInt(process.env.PORT ?? "3000", 10) || 3000;
 
 /**
  * =========================
@@ -33,7 +35,8 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(null, true); // mantém permissivo
+      // mantém permissivo como você estava
+      return cb(null, true);
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -197,10 +200,10 @@ async function checkoutHandler(req, res) {
 
   const amountCents = produto.preco_cents;
 
-  // pro front (string formatado)
+  // pro front
   const price = priceFromCents(amountCents);
 
-  // pro banco (numeric)
+  // pro banco
   const priceNumeric = numericPriceFromCents(amountCents);
   if (priceNumeric === null) {
     return res.status(500).json({
@@ -223,11 +226,10 @@ async function checkoutHandler(req, res) {
     await dbClient.query("BEGIN");
 
     /**
-     * ✅ FIX: sua tabela orders exige title, price e email (NOT NULL).
-     * Então este INSERT sempre preenche esses campos.
+     * ✅ Insert seguro: só colunas “core” que normalmente existem
+     * e resolvem o erro de NOT NULL (title/price/email).
      *
-     * Também preenche os campos legados (nome/data_nascimento/...) porque
-     * sua tabela atual já tem essas colunas.
+     * Se você tiver colunas extras, podemos adicionar depois.
      */
     const insert = await dbClient.query(
       `
@@ -237,42 +239,29 @@ async function checkoutHandler(req, res) {
             price,
             email,
             status,
-
             product_id,
             product_title,
             product_type,
             amount_cents,
             currency,
-
-            client_json,
-
-            nome,
-            data_nascimento,
-            hora_nascimento,
-            cidade_nascimento
+            client_json
           )
         VALUES
           (
             $1, $2, $3, 'created',
-            $4, $5, $6, $7, 'BRL',
-            $8,
-            $9, $10, $11, $12
+            $4, $5, $6, $7, 'BRL', $8
           )
         RETURNING id;
       `,
       [
-        produto.titulo,          // title NOT NULL
-        priceNumeric,            // price NOT NULL (numeric)
-        client.email,            // email NOT NULL
+        produto.titulo,     // title NOT NULL
+        priceNumeric,       // price NOT NULL (numeric)
+        client.email,       // email NOT NULL
         produtoIdResolved,
         produto.titulo,
         produto.tipo,
         amountCents,
-        clientDb,                // jsonb
-        client.nome,             // legado
-        client.dataNascimento,   // legado
-        client.horaNascimento,   // legado
-        client.cidadeNascimento, // legado
+        clientDb,           // json/jsonb
       ]
     );
 
@@ -322,7 +311,7 @@ async function checkoutHandler(req, res) {
         produtoId: produtoIdResolved,
         titulo: produto.titulo,
         tipo: produto.tipo,
-        price, // string pro front
+        price,
       },
     });
   } catch (e) {
@@ -432,11 +421,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
-    const payloadN8n = {
-      source: "mercadopago_webhook",
-      order,
-      payment,
-    };
+    const payloadN8n = { source: "mercadopago_webhook", order, payment };
 
     try {
       const n8nRes = await axios.post(n8nUrl, payloadN8n, {
@@ -488,6 +473,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
     await ensureSchema();
     console.log("✅ DB schema ok");
 
+    // ✅ ÚNICO listen (aqui)
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Backend rodando na porta ${PORT}`);
       console.log(`   Rotas: POST /checkout | POST /orders`);
