@@ -1,0 +1,31 @@
+services:
+  api-alma:
+    container_name: api-alma
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["node", "server.js"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=root_web"
+      - "traefik.http.routers.api-alma.rule=Host(`api.almaliraramos.com.br`)"
+      - "traefik.http.routers.api-alma.entrypoints=websecure"
+      - "traefik.http.routers.api-alma.tls=true"
+      - "traefik.http.services.api-alma.loadbalancer.server.port=3000"
+    networks:
+      - root_web
+
+  reconcile-alma:
+    container_name: reconcile-alma
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["node", "reconcilePayments.js"]
+    networks:
+      - root_web
+
+networks:
+  root_web:
+    external: true
