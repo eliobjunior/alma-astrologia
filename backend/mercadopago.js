@@ -1,112 +1,89 @@
-// backend/mercadopago.js
-import "dotenv/config";
-import { MercadoPagoConfig, Preference } from "mercadopago";
+// backend/mercadopago.js (ESM)
+// Objetivo: criar pagamento no Mercado Pago SEMPRE com external_reference = `order:<orderId>`
+// Isso é o que permite o worker reconcilePayments encontrar o pagamento depois.
+
+import mercadopago from "mercadopago";
 
 /**
- * Aceita QUALQUER uma dessas variáveis:
- * - MP_ACCESS_TOKEN (recomendado)
- * - MERCADOPAGO_ACCESS_TOKEN
- * - MP_TOKEN
- * - MERCADO_PAGO_ACCESS_TOKEN (compat)
+ * Resolve token do MP com tolerância a nomes diferentes no .env
  */
-const ACCESS_TOKEN =
-  process.env.MP_ACCESS_TOKEN ||
-  process.env.MERCADOPAGO_ACCESS_TOKEN ||
-  process.env.MP_TOKEN ||
-  process.env.MERCADO_PAGO_ACCESS_TOKEN;
-
-if (!ACCESS_TOKEN) {
-  console.warn("[mercadopago] ATENÇÃO: Access Token não definido no .env. Pagamentos vão falhar.");
-}
-
-const mpClient = ACCESS_TOKEN ? new MercadoPagoConfig({ accessToken: ACCESS_TOKEN }) : null;
-
-function getNotificationUrl() {
-  return (
-    process.env.MP_WEBHOOK_URL ||
-    process.env.MERCADO_PAGO_WEBHOOK_URL ||
-    process.env.MERCADOPAGO_WEBHOOK_URL ||
-    ""
-  );
-}
-
-export function getMpToken() {
+function resolveMpToken() {
   return (
     process.env.MP_ACCESS_TOKEN ||
     process.env.MERCADOPAGO_ACCESS_TOKEN ||
+    process.env.MERCADO_PAGO_ACCESS_TOKEN || // <- seu .env usa este
     process.env.MP_TOKEN ||
-    process.env.MERCADO_PAGO_ACCESS_TOKEN ||
     ""
   );
 }
 
-export async function criarPagamento({ produto, orderId, customer }) {
-  if (!mpClient) throw new Error("Access token do Mercado Pago ausente no backend");
-  if (!produto) throw new Error("Produto é obrigatório");
-  if (!orderId) throw new Error("orderId é obrigatório");
-  if (!customer?.email) throw new Error("customer.email é obrigatório");
+const ACCESS_TOKEN = resolveMpToken();
 
-  const title = produto.title || produto.titulo || produto.nome || produto.name || "Produto";
+if (!ACCESS_TOKEN) {
+  console.warn(
+    "[mercadopago] ATENÇÃO: token ausente. Defina MP_ACCESS_TOKEN (ou MERCADO_PAGO_ACCESS_TOKEN)."
+  );
+} else {
+  mercadopago.configure({ access_token: ACCESS_TOKEN });
+}
 
-  let unitPrice = null;
-  if (typeof produto.preco_cents === "number") unitPrice = produto.preco_cents / 100;
-  else if (typeof produto.price === "number") unitPrice = produto.price;
-  else if (typeof produto.preco === "number") unitPrice = produto.preco;
+/**
+ * Cria uma preferência de pagamento e retorna init_point.
+ * Esperado:
+ * - produto: { id|produtoId, nome|title, preco|preco_reais|price }
+ * - order: { id: number|string, email: string }
+ *
+ * IMPORTANTE: external_reference precisa existir e bater com o que o worker busca:
+ *   external_reference = `order:${orderId}`
+ */
+export async function criarPagamentoPreference({ produto, order, backUrls }) {
+  if (!ACCESS_TOKEN) throw new Error("MP access token não configurado.");
 
-  if (typeof unitPrice !== "number" || Number.isNaN(unitPrice) || unitPrice <= 0) {
-    throw new Error("Preço inválido para Mercado Pago (unit_price)");
+  const orderId = order?.id;
+  if (!orderId) throw new Error("order.id é obrigatório para external_reference.");
+
+  // preço (aceita float em reais)
+  const unit_price =
+    Number(produto?.preco_reais ?? produto?.preco ?? produto?.price ?? 0);
+
+  if (!unit_price || Number.isNaN(unit_price)) {
+    throw new Error("Preço do produto inválido.");
   }
 
-  const notificationUrl = getNotificationUrl();
-  if (!notificationUrl) {
-    console.warn("[mercadopago] Webhook URL não definida (MP_WEBHOOK_URL / MERCADO_PAGO_WEBHOOK_URL).");
-  }
+  const title = produto?.nome ?? produto?.title ?? "Produto";
 
-  const frontendBase = process.env.FRONTEND_URL || "https://almaliraramos.com.br";
-
-  const preferenceBody = {
+  const preference = {
     items: [
       {
         title,
         quantity: 1,
+        unit_price,
         currency_id: "BRL",
-        unit_price: unitPrice,
       },
     ],
-    payer: {
-      name: customer.name || customer.nome || "Cliente",
-      email: customer.email,
-    },
+
+    // 🔴 CAUSA RAIZ DO SEU PROBLEMA: isso precisa estar SEMPRE presente
     external_reference: `order:${orderId}`,
 
-    // URL do BACKEND que recebe notificações do Mercado Pago
-    notification_url: notificationUrl || undefined,
+    payer: {
+      email: order?.email,
+    },
 
     back_urls: {
-      success: process.env.FRONTEND_SUCCESS_URL || `${frontendBase}/sucesso`,
-      failure: process.env.FRONTEND_FAILURE_URL || `${frontendBase}/erro`,
-      pending: process.env.FRONTEND_PENDING_URL || `${frontendBase}/pendente`,
+      success: backUrls?.success || "https://almaliraramos.com.br/obrigado",
+      failure: backUrls?.failure || "https://almaliraramos.com.br/erro",
+      pending: backUrls?.pending || "https://almaliraramos.com.br/pending",
     },
+
     auto_return: "approved",
   };
 
-  try {
-    const preference = new Preference(mpClient);
-    const response = await preference.create({ body: preferenceBody });
+  const resp = await mercadopago.preferences.create(preference);
 
-    const data = response?.body ?? response;
-
-    return {
-      id: data?.id || null,
-      init_point: data?.init_point || null,
-      sandbox_init_point: data?.sandbox_init_point || null,
-    };
-  } catch (error) {
-    console.log("========== ERRO MERCADO PAGO ==========");
-    console.log("message:", error?.message);
-    console.log("status:", error?.response?.status);
-    console.log("data:", error?.response?.data);
-    console.log("======================================");
-    throw error;
-  }
+  return {
+    preferenceId: resp?.body?.id,
+    init_point: resp?.body?.init_point,
+    sandbox_init_point: resp?.body?.sandbox_init_point,
+    external_reference: preference.external_reference,
+  };
 }
