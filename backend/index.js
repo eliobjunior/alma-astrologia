@@ -106,6 +106,49 @@ function numericPriceFromCents(amountCents) {
 
 /**
  * =========================
+ * N8N AUTH (igual reconcile)
+ * =========================
+ */
+function makeBasicAuthHeader(user, pass) {
+  if (!user || !pass) return "";
+  const token = Buffer.from(`${user}:${pass}`).toString("base64");
+  return `Basic ${token}`;
+}
+
+function buildN8nHeaders() {
+  // ✅ Basic Auth (o que funcionou no seu teste)
+  const N8N_AUTH_USER =
+    process.env.N8N_AUTH_USER ||
+    process.env.N8N_AUTH_HEADER_NAME ||
+    "api-key-pagamento-aprovado";
+
+  const N8N_AUTH_PASS =
+    process.env.N8N_AUTH_PASS ||
+    process.env.N8N_AUTH_HEADER_VALUE ||
+    process.env.N8N_WEBHOOK_TOKEN ||
+    "";
+
+  // ✅ Header Auth (fallback compatível com seu webhook node se estiver “Header Auth”)
+  const N8N_HEADER_AUTH_NAME =
+    process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+
+  const N8N_HEADER_AUTH_VALUE =
+    process.env.N8N_AUTH_HEADER_VALUE || process.env.N8N_WEBHOOK_TOKEN || "";
+
+  const headers = { "Content-Type": "application/json" };
+
+  const basic = makeBasicAuthHeader(N8N_AUTH_USER, N8N_AUTH_PASS);
+  if (basic) headers["Authorization"] = basic;
+
+  if (N8N_HEADER_AUTH_VALUE) {
+    headers[N8N_HEADER_AUTH_NAME] = N8N_HEADER_AUTH_VALUE;
+  }
+
+  return headers;
+}
+
+/**
+ * =========================
  * ROUTES
  * =========================
  */
@@ -435,15 +478,22 @@ app.post("/webhook/mercadopago", async (req, res) => {
       return;
     }
 
+    // ✅ payload “flat” (igual ao teste que funcionou)
     const payloadN8n = {
-      source: "mercadopago_webhook",
-      order,
-      payment,
+      produtoId: order.product_id,
+      id: order.id,
+      email: order.email,
+      nome: order.nome,
+      data_nascimento: order.data_nascimento,
+      hora_nascimento: order.hora_nascimento,
+      cidade_nascimento: order.cidade_nascimento,
     };
 
     try {
+      const headers = buildN8nHeaders();
+
       const n8nRes = await axios.post(n8nUrl, payloadN8n, {
-        headers: { "Content-Type": "application/json" },
+        headers,
         timeout: 20000,
       });
 
