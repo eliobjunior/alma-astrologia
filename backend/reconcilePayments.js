@@ -10,17 +10,33 @@ const MP_TOKEN =
   process.env.MP_TOKEN;
 
 if (!MP_TOKEN) {
-  console.error("[reconcile] MP token ausente (MP_ACCESS_TOKEN / MERCADOPAGO_ACCESS_TOKEN / MP_TOKEN)");
+  console.error(
+    "[reconcile][fatal] MP token ausente (MP_ACCESS_TOKEN / MERCADOPAGO_ACCESS_TOKEN / MP_TOKEN)"
+  );
   process.exit(1);
 }
 
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || "";
 
-// ✅ Header Auth do n8n (igual ao seu Webhook node: Header Auth)
-const N8N_AUTH_HEADER_NAME = process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
-const N8N_AUTH_HEADER_VALUE =
+// 🔐 Credenciais do n8n
+// Observação: você nos passou que o teste que funcionou foi com Basic Auth:
+// Username: api-key-pagamento-aprovado
+// Pass: <token>
+// Para NÃO mudar o .env, vamos aproveitar:
+// - N8N_AUTH_HEADER_NAME como USER
+// - N8N_AUTH_HEADER_VALUE como PASS
+const N8N_AUTH_USER = process.env.N8N_AUTH_USER || process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+const N8N_AUTH_PASS =
+  process.env.N8N_AUTH_PASS ||
   process.env.N8N_AUTH_HEADER_VALUE ||
   process.env.N8N_WEBHOOK_TOKEN || // fallback p/ compatibilidade
+  "";
+
+// ✅ Header Auth “legado” (caso seu webhook esteja configurado em Header Auth)
+const N8N_HEADER_AUTH_NAME = process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+const N8N_HEADER_AUTH_VALUE =
+  process.env.N8N_AUTH_HEADER_VALUE ||
+  process.env.N8N_WEBHOOK_TOKEN ||
   "";
 
 // Configs
@@ -28,8 +44,15 @@ const MIN_AGE_MINUTES = Number(process.env.RECONCILE_MIN_AGE_MINUTES || 5);
 const LOOP_LIMIT = Number(process.env.RECONCILE_LIMIT || 50);
 const INTERVAL_MS = Number(process.env.RECONCILE_INTERVAL_MS || 60_000);
 
+// Se quiser travar hard quando n8n não está configurado, mude para true.
 function mustHaveN8nConfigured() {
   return false;
+}
+
+function makeBasicAuthHeader(user, pass) {
+  if (!user || !pass) return "";
+  const token = Buffer.from(`${user}:${pass}`).toString("base64");
+  return `Basic ${token}`;
 }
 
 async function mpSearchByExternalReference(externalReference) {
@@ -41,12 +64,18 @@ async function mpSearchByExternalReference(externalReference) {
     headers: { Authorization: `Bearer ${MP_TOKEN}` },
   });
 
+  const txt = await r.text().catch(() => "");
   if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`[mp] search failed ${r.status} ${txt}`);
+    throw new Error(`[mp] search failed status=${r.status} response=${txt.slice(0, 400)}`);
   }
 
-  const data = await r.json();
+  let data;
+  try {
+    data = txt ? JSON.parse(txt) : {};
+  } catch {
+    data = {};
+  }
+
   return Array.isArray(data?.results) ? data.results : [];
 }
 
@@ -66,21 +95,32 @@ function pickBestPayment(payments) {
   return sorted[0] || null;
 }
 
-async function sendToN8n(payload) {
+async function sendToN8n(payload, orderId) {
   if (!N8N_WEBHOOK_URL) {
     if (mustHaveN8nConfigured()) throw new Error("N8N_WEBHOOK_URL não configurado no .env");
-    console.log("[reconcile] N8N_WEBHOOK_URL vazio; pulando envio ao n8n.");
-    return { skipped: true };
+    console.log(`[reconcile][n8n][skip] order=${orderId} reason=N8N_WEBHOOK_URL_empty`);
+    return { skipped: true, status: 0, body: "" };
   }
 
-  const headers = { "Content-Type": "application/json" };
+  const headers = {
+    "Content-Type": "application/json",
+  };
 
-  // ✅ Usa Header Auth do n8n
-  if (N8N_AUTH_HEADER_VALUE) {
-    headers[N8N_AUTH_HEADER_NAME] = N8N_AUTH_HEADER_VALUE;
-  } else {
-    console.warn("[reconcile] ATENÇÃO: N8N_AUTH_HEADER_VALUE vazio; n8n pode recusar.");
+  // ✅ 1) Basic Auth (o que você testou e funcionou)
+  const basic = makeBasicAuthHeader(N8N_AUTH_USER, N8N_AUTH_PASS);
+  if (basic) headers["Authorization"] = basic;
+
+  // ✅ 2) Compatibilidade: também envia Header Auth, caso seu webhook esteja assim
+  if (N8N_HEADER_AUTH_VALUE) {
+    headers[N8N_HEADER_AUTH_NAME] = N8N_HEADER_AUTH_VALUE;
   }
+
+  // Log do request (sem vazar segredo)
+  console.log(
+    `[reconcile][n8n][POST] order=${orderId} url=${N8N_WEBHOOK_URL} auth=basic(${Boolean(basic)}) headerAuth(${Boolean(
+      N8N_HEADER_AUTH_VALUE
+    )})`
+  );
 
   const r = await fetch(N8N_WEBHOOK_URL, {
     method: "POST",
@@ -89,7 +129,14 @@ async function sendToN8n(payload) {
   });
 
   const txt = await r.text().catch(() => "");
-  if (!r.ok) throw new Error(`[n8n] webhook failed ${r.status} ${txt}`);
+
+  console.log(
+    `[reconcile][n8n][response] order=${orderId} status=${r.status} response=${txt.slice(0, 300)}`
+  );
+
+  if (!r.ok) {
+    throw new Error(`[n8n] webhook failed status=${r.status} response=${txt.slice(0, 600)}`);
+  }
 
   return { ok: true, status: r.status, body: txt };
 }
@@ -139,11 +186,25 @@ async function reconcileOnce() {
           `,
           ["not_found", o.id]
         );
+        console.log(`[reconcile][mp] order=${o.id} status=not_found`);
         continue;
       }
 
       const mpId = best?.id ? String(best.id) : null;
       const mpStatus = best?.status || null;
+
+      // Atualiza status do MP no pedido mesmo se ainda não approved
+      await pool.query(
+        `
+        UPDATE public.orders
+        SET mp_payment_id = COALESCE(mp_payment_id, $1),
+            mp_payment_status = $2,
+            updated_at = now()
+        WHERE id = $3
+          AND status = 'payment_pending'
+        `,
+        [mpId, mpStatus, o.id]
+      );
 
       if (mpStatus === "approved") {
         await pool.query(
@@ -162,6 +223,7 @@ async function reconcileOnce() {
 
         console.log(`[reconcile] order ${o.id} APROVADO (mp=${mpId})`);
 
+        // envia 1x por pedido
         if (!o.n8n_sent_at) {
           const payload = {
             produtoId: o.product_id,
@@ -174,7 +236,7 @@ async function reconcileOnce() {
           };
 
           try {
-            const res = await sendToN8n(payload);
+            const res = await sendToN8n(payload, o.id);
 
             await pool.query(
               `
@@ -188,7 +250,7 @@ async function reconcileOnce() {
               [o.id]
             );
 
-            console.log(`[reconcile] order ${o.id} enviado ao n8n (${res.status})`);
+            console.log(`[reconcile] order ${o.id} enviado ao n8n (status=${res.status})`);
           } catch (err) {
             const msg = String(err?.message || err);
 
@@ -203,7 +265,7 @@ async function reconcileOnce() {
               [msg, o.id]
             );
 
-            console.error(`[reconcile] n8n erro order ${o.id}:`, msg);
+            console.error(`[reconcile][n8n][error] order=${o.id} error=${msg}`);
           }
         }
 
@@ -224,32 +286,21 @@ async function reconcileOnce() {
           [mpId, mpStatus, o.id]
         );
 
-        console.log(`[reconcile] order ${o.id} FALHOU (status=${mpStatus})`);
+        console.log(`[reconcile] order ${o.id} FALHOU (status=${mpStatus}, mp=${mpId})`);
         continue;
       }
 
-      await pool.query(
-        `
-        UPDATE public.orders
-        SET mp_payment_id = COALESCE(mp_payment_id, $1),
-            mp_payment_status = $2,
-            updated_at = now()
-        WHERE id = $3
-          AND status = 'payment_pending'
-        `,
-        [mpId, mpStatus, o.id]
-      );
-
-      console.log(`[reconcile] order ${o.id} ainda ${mpStatus} (mp=${mpId})`);
+      console.log(`[reconcile][mp] order=${o.id} status=${mpStatus} mp=${mpId}`);
     } catch (e) {
-      console.error(`[reconcile] erro order ${o.id}:`, e?.message || e);
+      const msg = String(e?.message || e);
+      console.error(`[reconcile][error] order=${o.id} error=${msg}`);
       await pool.query(
         `
         UPDATE public.orders
         SET n8n_last_error = $1, updated_at = now()
         WHERE id = $2
         `,
-        [String(e?.message || e), o.id]
+        [msg, o.id]
       );
     }
   }
@@ -258,10 +309,10 @@ async function reconcileOnce() {
 async function main() {
   console.log("[reconcile] iniciado");
   await reconcileOnce();
-  setInterval(() => reconcileOnce().catch((e) => console.error(e)), INTERVAL_MS);
+  setInterval(() => reconcileOnce().catch((e) => console.error("[reconcile][loop_error]", e)), INTERVAL_MS);
 }
 
 main().catch((e) => {
-  console.error("[reconcile] fatal:", e);
+  console.error("[reconcile][fatal]:", e);
   process.exit(1);
 });
