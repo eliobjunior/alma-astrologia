@@ -1,5 +1,5 @@
-// backend/mercadopago.js (ESM)
-import mercadopago from "mercadopago";
+// backend/mercadopago.js (ESM) — compatível com mercadopago@^2.x
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
 /**
  * MP token
@@ -18,8 +18,16 @@ if (!ACCESS_TOKEN) {
   console.warn(
     "[mercadopago] ATENÇÃO: MP_ACCESS_TOKEN não definido no .env (pagamentos vão falhar)"
   );
-} else {
-  mercadopago.configure({ access_token: ACCESS_TOKEN });
+}
+
+/**
+ * Cria client do Mercado Pago (SDK v2)
+ */
+function getMpClient() {
+  if (!ACCESS_TOKEN) {
+    throw new Error("[mercadopago] MP access token ausente");
+  }
+  return new MercadoPagoConfig({ accessToken: ACCESS_TOKEN });
 }
 
 /**
@@ -54,9 +62,6 @@ export async function createPreference({
   payerEmail,
   backUrls = {},
 }) {
-  if (!ACCESS_TOKEN) {
-    throw new Error("[mercadopago] MP access token ausente");
-  }
   if (!orderId) {
     throw new Error("[mercadopago] orderId é obrigatório");
   }
@@ -66,7 +71,11 @@ export async function createPreference({
   // ✅ CHAVE DO SEU FLUXO: tem que ser igual ao que o reconcile busca
   const external_reference = `order:${orderId}`;
 
-  const preference = {
+  const client = getMpClient();
+  const preference = new Preference(client);
+
+  // SDK v2: create({ body })
+  const body = {
     items: [
       {
         title,
@@ -89,13 +98,24 @@ export async function createPreference({
       pending: backUrls?.pending || undefined,
     },
     auto_return: "approved",
+
+    // ✅ Opcional (mas recomendado se você usa notificações por webhook)
+    // notification_url: process.env.MP_NOTIFICATION_URL || undefined,
+
+    // ✅ Opcional: metadata para facilitar rastreio
+    metadata: {
+      orderId,
+      produtoId: produto?.id || produto?.produtoId || produto?.slug || undefined,
+      payerEmail: payerEmail || undefined,
+    },
   };
 
-  const res = await mercadopago.preferences.create(preference);
+  const res = await preference.create({ body });
 
-  const init_point = res?.body?.init_point;
-  const sandbox_init_point = res?.body?.sandbox_init_point;
-  const preferenceId = res?.body?.id;
+  // res normalmente devolve campos no próprio objeto (SDK v2)
+  const init_point = res?.init_point;
+  const sandbox_init_point = res?.sandbox_init_point;
+  const preferenceId = res?.id;
 
   if (!init_point && !sandbox_init_point) {
     throw new Error("[mercadopago] Não recebi init_point do Mercado Pago");
