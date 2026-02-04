@@ -1,16 +1,79 @@
 // backend/db.js
 import "dotenv/config";
-import { Pool } from "pg";
+import pg from "pg";
 
-export const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL })
+const { Pool } = pg;
+
+/**
+ * Helpers
+ */
+function boolFromEnv(v, def = false) {
+  if (v === undefined || v === null || v === "") return def;
+  return ["1", "true", "yes", "on"].includes(String(v).toLowerCase());
+}
+
+function strFromEnv(name, fallback = undefined) {
+  const v = process.env[name];
+  if (v === undefined || v === null || String(v).trim() === "") return fallback;
+  return String(v);
+}
+
+function intFromEnv(name, fallback) {
+  const v = strFromEnv(name, undefined);
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Config
+ * - Prefer DATABASE_URL (ideal para produção)
+ * - Caso não exista, usa DB_* (para compatibilidade)
+ */
+const DATABASE_URL = strFromEnv("DATABASE_URL", undefined);
+
+const DB_HOST = strFromEnv("DB_HOST", undefined);
+// Atenção: em container, localhost aponta pro próprio container.
+// Então: se NÃO tiver DATABASE_URL e NÃO tiver DB_HOST, falha com mensagem clara.
+const DB_PORT = intFromEnv("DB_PORT", 5432);
+const DB_NAME = strFromEnv("DB_NAME", "alma_ramos");
+const DB_USER = strFromEnv("DB_USER", "postgres");
+const DB_PASSWORD = strFromEnv("DB_PASSWORD", "");
+const DB_SSL = boolFromEnv(process.env.DB_SSL, false);
+
+// Falha rápida (importante pra evitar “rodar quebrado” e ficar em loop)
+if (!DATABASE_URL && (!DB_HOST || DB_HOST.trim() === "")) {
+  throw new Error(
+    "[db] DB_HOST não definido e DATABASE_URL ausente. " +
+      "Em Docker, NÃO use localhost. Use DB_HOST=host.docker.internal (com extra_hosts) " +
+      "ou forneça DATABASE_URL."
+  );
+}
+
+/**
+ * Pool
+ */
+export const pool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: DB_SSL ? { rejectUnauthorized: false } : false,
+    })
   : new Pool({
-      host: process.env.DB_HOST || "localhost",
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME || "alma_ramos",
-      user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD || "",
+      host: DB_HOST,
+      port: DB_PORT,
+      database: DB_NAME,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      ssl: DB_SSL ? { rejectUnauthorized: false } : false,
     });
+
+/**
+ * Ping simples (útil pra healthcheck/diagnóstico)
+ */
+export async function pingDb() {
+  const r = await pool.query("select 1 as ok");
+  return r?.rows?.[0]?.ok === 1;
+}
 
 /**
  * MIGRATION LIGHT (robusta)
@@ -101,21 +164,25 @@ export async function ensureSchema() {
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='n8n_last_error') THEN
         ALTER TABLE public.orders ADD COLUMN n8n_last_error TEXT;
       END IF;
+
+      -- Garantias defensivas (caso seu código use estes campos)
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='mp_payment_id') THEN
+        ALTER TABLE public.orders ADD COLUMN mp_payment_id TEXT;
+      END IF;
     END $$;
   `);
 
+  // Trigger updated_at
   await pool.query(`
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at_orders') THEN
-        CREATE OR REPLACE FUNCTION set_updated_at_orders()
-        RETURNS trigger AS $fn$
-        BEGIN
-          NEW.updated_at = now();
-          RETURN NEW;
-        END;
-        $fn$ LANGUAGE plpgsql;
-      END IF;
+      CREATE OR REPLACE FUNCTION set_updated_at_orders()
+      RETURNS trigger AS $fn$
+      BEGIN
+        NEW.updated_at = now();
+        RETURN NEW;
+      END;
+      $fn$ LANGUAGE plpgsql;
 
       IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at_orders') THEN
         CREATE TRIGGER trg_set_updated_at_orders
@@ -126,6 +193,9 @@ export async function ensureSchema() {
     END $$;
   `);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`);
+  // Índices úteis
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders(external_reference);`
+  );
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_email ON public.orders(email);`);
 }
