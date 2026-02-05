@@ -1,33 +1,95 @@
+version: "3.9"
+
 services:
-  api-alma:
-    container_name: api-alma
-    build: .
-    restart: unless-stopped
-    env_file:
-      - .env
-    command: ["node", "server.js"]
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=contato@almaliraramos.com.br"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - web
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: "eliobj"
+      POSTGRES_PASSWORD: "Lucca2026sucesso"
+      POSTGRES_DB: "alma_ramos"
+      # Garante auth host por senha (md5) no initdb (evita "no pg_hba.conf entry ... no encryption")
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - web
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      # URL pública do n8n (essencial pra Webhooks)
+      N8N_HOST: "n8n.almaliraramos.com.br"
+      N8N_PORT: 5678
+      N8N_PROTOCOL: "https"
+      WEBHOOK_URL: "https://n8n.almaliraramos.com.br"
+      N8N_EDITOR_BASE_URL: "https://n8n.almaliraramos.com.br"
+
+      N8N_TRUST_PROXY: "true"
+      GENERIC_TIMEZONE: "America/Sao_Paulo"
+      TZ: "America/Sao_Paulo"
+
+      # Banco do n8n (Postgres no Docker)
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "postgres"
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: "alma_ramos"
+      DB_POSTGRESDB_USER: "eliobj"
+      DB_POSTGRESDB_PASSWORD: "Lucca2026sucesso"
+
+      # (Opcional, mas recomendado) chave de criptografia estável do n8n
+      # Gere uma e mantenha fixa pra não perder credenciais:
+      # N8N_ENCRYPTION_KEY: "COLOQUE_UMA_CHAVE_FORTE_AQUI"
+
+    volumes:
+      - n8n_data:/home/node/.n8n
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=root_web"
-      - "traefik.http.routers.api-alma.rule=Host(`api.almaliraramos.com.br`)"
-      - "traefik.http.routers.api-alma.entrypoints=websecure"
-      - "traefik.http.routers.api-alma.tls=true"
-      - "traefik.http.services.api-alma.loadbalancer.server.port=3000"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.almaliraramos.com.br`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
     networks:
-      - root_web
-
-  reconcile-alma:
-    container_name: reconcile-alma
-    build: .
-    restart: unless-stopped
-    env_file:
-      - .env
-    extra_hosts:
-     - "host.docker.internal:host-gateway"
-    command: ["node", "reconcilePayments.js"]
-    networks:
-      - root_web
+      - web
 
 networks:
-  root_web:
-    external: true
+  web:
+    # fixa o nome real da rede para o backend usar como "root_web"
+    name: root_web
+    driver: bridge
+
+volumes:
+  traefik_data:
+    name: traefik_data
+  pgdata:
+    name: pgdata
+  n8n_data:
+    name: n8n_data

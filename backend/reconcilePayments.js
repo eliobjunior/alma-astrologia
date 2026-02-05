@@ -25,7 +25,11 @@ const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || "";
 // Para NÃO mudar o .env, vamos aproveitar:
 // - N8N_AUTH_HEADER_NAME como USER
 // - N8N_AUTH_HEADER_VALUE como PASS
-const N8N_AUTH_USER = process.env.N8N_AUTH_USER || process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+const N8N_AUTH_USER =
+  process.env.N8N_AUTH_USER ||
+  process.env.N8N_AUTH_HEADER_NAME ||
+  "api-key-pagamento-aprovado";
+
 const N8N_AUTH_PASS =
   process.env.N8N_AUTH_PASS ||
   process.env.N8N_AUTH_HEADER_VALUE ||
@@ -33,11 +37,11 @@ const N8N_AUTH_PASS =
   "";
 
 // ✅ Header Auth “legado” (caso seu webhook esteja configurado em Header Auth)
-const N8N_HEADER_AUTH_NAME = process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+const N8N_HEADER_AUTH_NAME =
+  process.env.N8N_AUTH_HEADER_NAME || "api-key-pagamento-aprovado";
+
 const N8N_HEADER_AUTH_VALUE =
-  process.env.N8N_AUTH_HEADER_VALUE ||
-  process.env.N8N_WEBHOOK_TOKEN ||
-  "";
+  process.env.N8N_AUTH_HEADER_VALUE || process.env.N8N_WEBHOOK_TOKEN || "";
 
 // Configs
 const MIN_AGE_MINUTES = Number(process.env.RECONCILE_MIN_AGE_MINUTES || 5);
@@ -66,7 +70,9 @@ async function mpSearchByExternalReference(externalReference) {
 
   const txt = await r.text().catch(() => "");
   if (!r.ok) {
-    throw new Error(`[mp] search failed status=${r.status} response=${txt.slice(0, 400)}`);
+    throw new Error(
+      `[mp] search failed status=${r.status} response=${txt.slice(0, 400)}`
+    );
   }
 
   let data;
@@ -89,7 +95,8 @@ function pickBestPayment(payments) {
     .slice()
     .sort(
       (a, b) =>
-        new Date(b?.date_created || 0).getTime() - new Date(a?.date_created || 0).getTime()
+        new Date(b?.date_created || 0).getTime() -
+        new Date(a?.date_created || 0).getTime()
     );
 
   return sorted[0] || null;
@@ -97,8 +104,11 @@ function pickBestPayment(payments) {
 
 async function sendToN8n(payload, orderId) {
   if (!N8N_WEBHOOK_URL) {
-    if (mustHaveN8nConfigured()) throw new Error("N8N_WEBHOOK_URL não configurado no .env");
-    console.log(`[reconcile][n8n][skip] order=${orderId} reason=N8N_WEBHOOK_URL_empty`);
+    if (mustHaveN8nConfigured())
+      throw new Error("N8N_WEBHOOK_URL não configurado no .env");
+    console.log(
+      `[reconcile][n8n][skip] order=${orderId} reason=N8N_WEBHOOK_URL_empty`
+    );
     return { skipped: true, status: 0, body: "" };
   }
 
@@ -117,9 +127,9 @@ async function sendToN8n(payload, orderId) {
 
   // Log do request (sem vazar segredo)
   console.log(
-    `[reconcile][n8n][POST] order=${orderId} url=${N8N_WEBHOOK_URL} auth=basic(${Boolean(basic)}) headerAuth(${Boolean(
-      N8N_HEADER_AUTH_VALUE
-    )})`
+    `[reconcile][n8n][POST] order=${orderId} url=${N8N_WEBHOOK_URL} auth=basic(${Boolean(
+      basic
+    )}) headerAuth(${Boolean(N8N_HEADER_AUTH_VALUE)})`
   );
 
   const r = await fetch(N8N_WEBHOOK_URL, {
@@ -131,14 +141,23 @@ async function sendToN8n(payload, orderId) {
   const txt = await r.text().catch(() => "");
 
   console.log(
-    `[reconcile][n8n][response] order=${orderId} status=${r.status} response=${txt.slice(0, 300)}`
+    `[reconcile][n8n][response] order=${orderId} status=${r.status} response=${txt.slice(
+      0,
+      300
+    )}`
   );
 
   if (!r.ok) {
-    throw new Error(`[n8n] webhook failed status=${r.status} response=${txt.slice(0, 600)}`);
+    throw new Error(
+      `[n8n] webhook failed status=${r.status} response=${txt.slice(0, 600)}`
+    );
   }
 
   return { ok: true, status: r.status, body: txt };
+}
+
+function normalizeMpStatus(status) {
+  return status ? String(status).toLowerCase() : null;
 }
 
 async function reconcileOnce() {
@@ -183,6 +202,7 @@ async function reconcileOnce() {
           UPDATE public.orders
           SET mp_payment_status = $1, updated_at = now()
           WHERE id = $2
+            AND status = 'payment_pending'
           `,
           ["not_found", o.id]
         );
@@ -191,52 +211,72 @@ async function reconcileOnce() {
       }
 
       const mpId = best?.id ? String(best.id) : null;
-      const mpStatus = best?.status || null;
+      const mpStatusRaw = best?.status || null;
+      const mpStatus = normalizeMpStatus(mpStatusRaw);
 
-      // Atualiza status do MP no pedido mesmo se ainda não approved
-      await pool.query(
+      // ✅ UPDATE ÚNICO: grava mp_* sempre, e faz transição de status quando for terminal.
+      // - approved => status 'paid' + pagamento_em
+      // - rejected/cancelled => status 'payment_failed'
+      // - demais => mantém payment_pending
+      const upd = await pool.query(
         `
         UPDATE public.orders
-        SET mp_payment_id = COALESCE(mp_payment_id, $1),
-            mp_payment_status = $2,
-            updated_at = now()
+        SET
+          mp_payment_id = COALESCE(mp_payment_id, $1),
+          mp_payment_status = $2,
+          status = CASE
+            WHEN $2 = 'approved' THEN 'paid'
+            WHEN $2 IN ('rejected', 'cancelled') THEN 'payment_failed'
+            ELSE status
+          END,
+          pagamento_em = CASE
+            WHEN $2 = 'approved' THEN COALESCE(pagamento_em, now())
+            ELSE pagamento_em
+          END,
+          updated_at = now()
         WHERE id = $3
           AND status = 'payment_pending'
+        RETURNING
+          id,
+          status,
+          n8n_sent_at,
+          email,
+          nome,
+          data_nascimento,
+          hora_nascimento,
+          cidade_nascimento,
+          product_id
         `,
         [mpId, mpStatus, o.id]
       );
 
-      if (mpStatus === "approved") {
-        await pool.query(
-          `
-          UPDATE public.orders
-          SET status = 'paid',
-              mp_payment_id = $1,
-              mp_payment_status = $2,
-              datapagamento = COALESCE(datapagamento, now()),
-              updated_at = now()
-          WHERE id = $3
-            AND status = 'payment_pending'
-          `,
-          [mpId, mpStatus, o.id]
+      // Se não atualizou nada, alguém já moveu o status (ou não era mais pending).
+      if (!upd.rowCount) {
+        console.log(
+          `[reconcile][skip] order=${o.id} reason=not_pending_anymore mpStatus=${mpStatus} mp=${mpId}`
         );
+        continue;
+      }
 
-        console.log(`[reconcile] order ${o.id} APROVADO (mp=${mpId})`);
+      const cur = upd.rows[0];
 
-        // envia 1x por pedido
-        if (!o.n8n_sent_at) {
+      if (cur.status === "paid") {
+        console.log(`[reconcile] order ${cur.id} APROVADO (mp=${mpId})`);
+
+        // envia 1x por pedido (agora usando o estado REAL pós-update)
+        if (!cur.n8n_sent_at) {
           const payload = {
-            produtoId: o.product_id,
-            id: o.id,
-            email: o.email,
-            nome: o.nome,
-            data_nascimento: o.data_nascimento,
-            hora_nascimento: o.hora_nascimento,
-            cidade_nascimento: o.cidade_nascimento,
+            produtoId: cur.product_id,
+            id: cur.id,
+            email: cur.email,
+            nome: cur.nome,
+            data_nascimento: cur.data_nascimento,
+            hora_nascimento: cur.hora_nascimento,
+            cidade_nascimento: cur.cidade_nascimento,
           };
 
           try {
-            const res = await sendToN8n(payload, o.id);
+            const res = await sendToN8n(payload, cur.id);
 
             await pool.query(
               `
@@ -247,10 +287,12 @@ async function reconcileOnce() {
                   updated_at = now()
               WHERE id = $1
               `,
-              [o.id]
+              [cur.id]
             );
 
-            console.log(`[reconcile] order ${o.id} enviado ao n8n (status=${res.status})`);
+            console.log(
+              `[reconcile] order ${cur.id} enviado ao n8n (status=${res.status})`
+            );
           } catch (err) {
             const msg = String(err?.message || err);
 
@@ -262,35 +304,26 @@ async function reconcileOnce() {
                   updated_at = now()
               WHERE id = $2
               `,
-              [msg, o.id]
+              [msg, cur.id]
             );
 
-            console.error(`[reconcile][n8n][error] order=${o.id} error=${msg}`);
+            console.error(
+              `[reconcile][n8n][error] order=${cur.id} error=${msg}`
+            );
           }
         }
 
         continue;
       }
 
-      if (["rejected", "cancelled"].includes(mpStatus)) {
-        await pool.query(
-          `
-          UPDATE public.orders
-          SET status = 'payment_failed',
-              mp_payment_id = COALESCE(mp_payment_id, $1),
-              mp_payment_status = $2,
-              updated_at = now()
-          WHERE id = $3
-            AND status = 'payment_pending'
-          `,
-          [mpId, mpStatus, o.id]
+      if (cur.status === "payment_failed") {
+        console.log(
+          `[reconcile] order ${cur.id} FALHOU (status=${mpStatus}, mp=${mpId})`
         );
-
-        console.log(`[reconcile] order ${o.id} FALHOU (status=${mpStatus}, mp=${mpId})`);
         continue;
       }
 
-      console.log(`[reconcile][mp] order=${o.id} status=${mpStatus} mp=${mpId}`);
+      console.log(`[reconcile][mp] order=${cur.id} status=${mpStatus} mp=${mpId}`);
     } catch (e) {
       const msg = String(e?.message || e);
       console.error(`[reconcile][error] order=${o.id} error=${msg}`);
@@ -309,7 +342,13 @@ async function reconcileOnce() {
 async function main() {
   console.log("[reconcile] iniciado");
   await reconcileOnce();
-  setInterval(() => reconcileOnce().catch((e) => console.error("[reconcile][loop_error]", e)), INTERVAL_MS);
+  setInterval(
+    () =>
+      reconcileOnce().catch((e) =>
+        console.error("[reconcile][loop_error]", e)
+      ),
+    INTERVAL_MS
+  );
 }
 
 main().catch((e) => {
