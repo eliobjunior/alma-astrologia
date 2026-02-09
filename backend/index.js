@@ -23,17 +23,18 @@ app.set("trust proxy", 1);
 /**
  * =========================
  * SECURITY HEADERS (API)
+ * (Não quebra nada do fluxo; é header-only)
  * =========================
  */
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'none'; frame-ancestors 'none'"
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
   );
+  res.setHeader("Content-Security-Policy", "upgrade-insecure-requests");
   next();
 });
 
@@ -56,43 +57,94 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, cb) => {
+      // Mercado Pago / ferramentas server-to-server não enviam Origin
       if (!origin) return cb(null, true);
+
       if (allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error("CORS: origin not allowed"), false);
     },
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Session-Token"],
+    // ✅ inclua aqui headers usados pela proteção (não quebra)
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Session-Token",
+      "X-Checkout-Token",
+    ],
     credentials: true,
   })
 );
 
 app.options("*", cors());
 
-function getOrigin(req) {
-  return req.headers.origin || "";
+function originFromReq(req) {
+  return String(req.headers.origin || "").trim();
 }
 
-function isAllowedOrigin(req) {
-  const origin = getOrigin(req);
-  return Boolean(origin && allowedOrigins.includes(origin));
+function originFromReferer(req) {
+  const ref = String(req.headers.referer || "").trim();
+  if (!ref) return "";
+  try {
+    const u = new URL(ref);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "";
+  }
+}
+
+function isAllowedOriginOrReferer(req) {
+  const o = originFromReq(req);
+  if (o) return allowedOrigins.includes(o);
+
+  // Se não tiver Origin (casos raros), cai para Referer
+  const r = originFromReferer(req);
+  if (r) return allowedOrigins.includes(r);
+
+  return false;
 }
 
 /**
  * =========================
- * RATE LIMIT (simples)
+ * RATE LIMIT (por IP real)
  * =========================
  */
+function getRealIp(req) {
+  // Cloudflare (se você estiver usando)
+  const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+  if (cf) return cf;
+
+  // Alguns proxies setam X-Real-IP
+  const xri = String(req.headers["x-real-ip"] || "").trim();
+  if (xri) return xri;
+
+  // Traefik / proxies padrão
+  const xff = String(req.headers["x-forwarded-for"] || "").trim();
+  if (xff) return xff.split(",")[0].trim();
+
+  // Com trust proxy, req.ip geralmente já vem correto
+  if (req.ip) return String(req.ip);
+
+  // fallback
+  return String(req.socket?.remoteAddress || "unknown");
+}
+
 function makeRateLimiter({ windowMs, max, keyPrefix }) {
   const hits = new Map(); // key -> { count, resetAt }
-  return function rateLimit(req, res, next) {
-    const ip =
-      String(req.headers["cf-connecting-ip"] || "").trim() ||
-      String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-      req.socket.remoteAddress ||
-      "unknown";
 
+  // limpeza simples para não crescer indefinidamente
+  function cleanup(now) {
+    for (const [k, v] of hits.entries()) {
+      if (!v || now > v.resetAt) hits.delete(k);
+    }
+  }
+
+  return function rateLimit(req, res, next) {
+    const ip = getRealIp(req);
     const key = `${keyPrefix}:${ip}`;
     const now = Date.now();
+
+    // limpeza leve (barata) a cada requisição
+    cleanup(now);
 
     const cur = hits.get(key);
     if (!cur || now > cur.resetAt) {
@@ -136,15 +188,21 @@ const limitWebhook = makeRateLimiter({
 
 /**
  * =========================
- * ANTI-CLONE: SESSION TOKEN
+ * ANTI-CLONE: SESSION TOKEN (curto, assinado)
  * =========================
  */
 const SESSION_TOKEN_SECRET = process.env.SESSION_TOKEN_SECRET || "";
-const SESSION_TOKEN_TTL_SECONDS = Number(process.env.SESSION_TOKEN_TTL_SECONDS || 120);
+const SESSION_TOKEN_TTL_SECONDS = Number(
+  process.env.SESSION_TOKEN_TTL_SECONDS || 120
+);
+
+// ✅ Token adicional (opcional) para travar /checkout ainda mais.
+// ⚠️ Não quebra fluxo: se não setar no .env, ele é ignorado.
+const CHECKOUT_TOKEN = process.env.CHECKOUT_TOKEN || "";
 
 if (!SESSION_TOKEN_SECRET) {
   console.warn(
-    "[security] SESSION_TOKEN_SECRET ausente. Anti-clone desativado (configure em produção)."
+    "[security] SESSION_TOKEN_SECRET ausente. Anti-clone (session-token) desativado."
   );
 }
 
@@ -206,25 +264,55 @@ function verifySessionToken(token) {
   return { ok: true };
 }
 
-function requireSessionToken(req, res, next) {
-  const bypass = String(process.env.SESSION_TOKEN_BYPASS || "").toLowerCase() === "true";
+function timingSafeEquals(a, b) {
+  const ba = Buffer.from(String(a || ""));
+  const bb = Buffer.from(String(b || ""));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+/**
+ * Proteção para /checkout:
+ * - exige origem/referer permitido (quando navegador)
+ * - exige session token válido (anti-clone)
+ * - opcionalmente exige CHECKOUT_TOKEN (hard lock)
+ *
+ * ✅ Não quebra: CHECKOUT_TOKEN só passa a ser exigido quando você configurar no .env
+ */
+function requireCheckoutProtection(req, res, next) {
+  const bypass =
+    String(process.env.SESSION_TOKEN_BYPASS || "").toLowerCase() === "true";
   if (bypass) return next();
 
-  const originOk = isAllowedOrigin(req);
-  const token =
-    req.headers["x-session-token"] ||
-    req.body?.sessionToken ||
-    "";
+  const originOk = isAllowedOriginOrReferer(req);
 
-  const v = verifySessionToken(String(token));
+  const sessionToken =
+    req.headers["x-session-token"] || req.body?.sessionToken || "";
 
-  if (!originOk || !v.ok) {
+  const v = verifySessionToken(String(sessionToken));
+
+  // Token adicional (opcional)
+  let checkoutTokenOk = true;
+  if (CHECKOUT_TOKEN) {
+    const headerToken =
+      req.headers["x-checkout-token"] ||
+      req.headers["authorization"]?.toString().replace(/^Bearer\s+/i, "") ||
+      "";
+    checkoutTokenOk = timingSafeEquals(
+      String(headerToken),
+      String(CHECKOUT_TOKEN)
+    );
+  }
+
+  if (!originOk || !v.ok || !checkoutTokenOk) {
     return res.status(403).json({
       status: "error",
       message: "Acesso negado (proteção anti-clone).",
       origin_ok: originOk,
-      token_ok: v.ok,
-      token_reason: v.ok ? undefined : v.reason,
+      session_ok: v.ok,
+      session_reason: v.ok ? undefined : v.reason,
+      checkout_token_required: Boolean(CHECKOUT_TOKEN),
+      checkout_token_ok: checkoutTokenOk,
     });
   }
 
@@ -314,9 +402,7 @@ function buildN8nHeaders() {
     "api-key-pagamento-aprovado";
 
   const headerValue =
-    process.env.N8N_AUTH_HEADER_VALUE ||
-    process.env.N8N_WEBHOOK_TOKEN ||
-    "";
+    process.env.N8N_AUTH_HEADER_VALUE || process.env.N8N_WEBHOOK_TOKEN || "";
 
   const headers = { "Content-Type": "application/json" };
 
@@ -358,8 +444,11 @@ app.get("/health", async (req, res) => {
  * =========================
  */
 app.get("/session-token", limitSessionToken, (req, res) => {
-  if (!isAllowedOrigin(req)) {
-    return res.status(403).json({ status: "error", message: "Origin não permitido." });
+  // Para não quebrar, aceitamos origin OU referer válido aqui também
+  if (!isAllowedOriginOrReferer(req)) {
+    return res
+      .status(403)
+      .json({ status: "error", message: "Origin/Referer não permitido." });
   }
   if (!SESSION_TOKEN_SECRET) {
     return res.status(501).json({
@@ -445,6 +534,16 @@ async function checkoutHandler(req, res) {
     });
   }
 
+  // ✅ Fallback defensivo: title nunca pode virar null/undefined (Postgres tem NOT NULL)
+  const produtoTitleSafe = String(
+    produto?.titulo ||
+      produto?.title ||
+      produto?.nome ||
+      produto?.name ||
+      produtoIdResolved ||
+      ""
+  ).trim() || String(produtoIdResolved || "produto").trim();
+
   const amountCents = produto.preco_cents;
   const price = priceFromCents(amountCents);
   const priceNumeric = numericPriceFromCents(amountCents);
@@ -460,7 +559,7 @@ async function checkoutHandler(req, res) {
   const clientDb = {
     ...client,
     produtoId: produtoIdResolved,
-    produtoTitulo: produto.titulo,
+    produtoTitulo: produtoTitleSafe,
     produtoTipo: produto.tipo,
   };
 
@@ -501,11 +600,11 @@ async function checkoutHandler(req, res) {
         RETURNING id;
       `,
       [
-        produto.titulo,
+        produtoTitleSafe, // ✅ nunca mais null
         priceNumeric,
         client.email,
         produtoIdResolved,
-        produto.titulo,
+        produtoTitleSafe, // ✅ mantém consistência
         produto.tipo,
         amountCents,
         clientDb,
@@ -527,7 +626,7 @@ async function checkoutHandler(req, res) {
     await dbClient.query("COMMIT");
 
     const pagamento = await criarPagamento({
-      produto: { title: produto.titulo, preco_cents: produto.preco_cents },
+      produto: { title: produtoTitleSafe, preco_cents: produto.preco_cents },
       orderId,
       customer: { name: client.nome, email: client.email },
     });
@@ -557,7 +656,7 @@ async function checkoutHandler(req, res) {
       init_point: pagamento.init_point,
       produto: {
         produtoId: produtoIdResolved,
-        titulo: produto.titulo,
+        titulo: produtoTitleSafe,
         tipo: produto.tipo,
         price,
       },
@@ -575,9 +674,9 @@ async function checkoutHandler(req, res) {
   }
 }
 
-// ✅ Protegendo rotas sensíveis
-app.post("/checkout", limitCheckout, requireSessionToken, checkoutHandler);
-app.post("/orders", limitCheckout, requireSessionToken, checkoutHandler);
+// ✅ Protegendo rotas sensíveis (domínio+token) + rate limit por IP real
+app.post("/checkout", limitCheckout, requireCheckoutProtection, checkoutHandler);
+app.post("/orders", limitCheckout, requireCheckoutProtection, checkoutHandler);
 
 /**
  * =========================
@@ -586,6 +685,7 @@ app.post("/orders", limitCheckout, requireSessionToken, checkoutHandler);
  * =========================
  */
 app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
+  // responde rápido pro MP
   res.status(200).send("OK");
 
   try {
@@ -600,7 +700,10 @@ app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
       null;
 
     if ((type !== "payment" && type !== "payments") || !dataId) {
-      console.warn("Webhook ignorado (sem payment/type ou sem data.id)", { type, dataId });
+      console.warn("Webhook ignorado (sem payment/type ou sem data.id)", {
+        type,
+        dataId,
+      });
       return;
     }
 
@@ -622,7 +725,10 @@ app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
 
     const orderId = parseOrderIdFromExternalRef(externalRef);
     if (!orderId) {
-      console.error("Não consegui extrair orderId do external_reference:", externalRef);
+      console.error(
+        "Não consegui extrair orderId do external_reference:",
+        externalRef
+      );
       return;
     }
 
@@ -642,7 +748,11 @@ app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
     const okValue = expected > 0 ? Math.abs(amountPaid - expected) < 0.01 : true;
 
     if (!okValue) {
-      console.error("Webhook MP com valor divergente. Ignorando.", { orderId, expected, amountPaid });
+      console.error("Webhook MP com valor divergente. Ignorando.", {
+        orderId,
+        expected,
+        amountPaid,
+      });
       return;
     }
 
@@ -660,12 +770,18 @@ app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
     );
 
     if (!["approved", "authorized"].includes(mpStatus)) {
-      console.log("Pagamento não aprovado ainda. Não dispara n8n.", { orderId, mpStatus });
+      console.log("Pagamento não aprovado ainda. Não dispara n8n.", {
+        orderId,
+        mpStatus,
+      });
       return;
     }
 
     if (order.n8n_sent_at) {
-      console.log("n8n já disparado. Ignorando webhook repetido.", { orderId, mpStatus });
+      console.log("n8n já disparado. Ignorando webhook repetido.", {
+        orderId,
+        mpStatus,
+      });
       return;
     }
 
@@ -704,7 +820,11 @@ app.post("/webhook/mercadopago", limitWebhook, async (req, res) => {
         [orderId]
       );
 
-      console.log("✅ n8n disparado com sucesso", { orderId, mpStatus, n8nStatus: n8nRes.status });
+      console.log("✅ n8n disparado com sucesso", {
+        orderId,
+        mpStatus,
+        n8nStatus: n8nRes.status,
+      });
     } catch (err) {
       const msg = err?.response?.data
         ? JSON.stringify(err.response.data)
@@ -752,6 +872,9 @@ app.use((req, res) => {
       console.log(`   Rotas: POST /checkout | POST /orders`);
       console.log(`   Health: GET /health`);
       console.log(`   Webhook: POST /webhook/mercadopago`);
+      console.log(
+        `   Proteções: origin/referer + session-token + (opcional) CHECKOUT_TOKEN + rate-limit por IP`
+      );
     });
   } catch (e) {
     console.error("❌ Falha ao iniciar:", e?.message || e);
