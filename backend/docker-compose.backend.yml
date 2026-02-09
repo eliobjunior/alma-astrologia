@@ -58,11 +58,29 @@ services:
       DB_PORT: "5432"
     labels:
       - "traefik.enable=true"
+
+      # ✅ mantém o router/service exatamente como está (NÃO renomeia)
       - "traefik.http.routers.api.rule=Host(`api.almaliraramos.com.br`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls=true"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.services.api.loadbalancer.server.port=3000"
+
+      # ✅ adiciona middleware de segurança SEM mudar rotas/portas
+      - "traefik.http.routers.api.middlewares=api-sec-headers@docker"
+
+      # ✅ Security Headers (não interferem no funcionamento do backend)
+      - "traefik.http.middlewares.api-sec-headers.headers.stsSeconds=63072000"
+      - "traefik.http.middlewares.api-sec-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.api-sec-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.api-sec-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.api-sec-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.api-sec-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.api-sec-headers.headers.permissionsPolicy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+      # ✅ CSP leve (não quebra API; só força https em subrequests)
+      - "traefik.http.middlewares.api-sec-headers.headers.contentSecurityPolicy=upgrade-insecure-requests"
+
     networks:
       - web
 
